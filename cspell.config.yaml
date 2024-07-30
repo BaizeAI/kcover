@@ -4,26 +4,32 @@ dictionaryDefinitions: []
 dictionaries: []
 words:
   - apimachinery
+  - automount
   - baizeai
   - clientcmd
   - containerlogs
+  - coordinationv1client
   - corev1
   - CUDA
   - CUDNN
   - dcgm
   - dcgmi
   - exitcode
+  - fullname
   - Infof
   - jellydator
   - klog
   - KUBECONFIG
   - Kubeflow
+  - leaderelection
   - metav1
   - NCCL
   - nvidiadiag
   - podstatus
   - pytorchjobs
+  - resourcelock
   - samber
+  - serviceaccount
   - stretchr
   - tfjobs
   - ttlcache

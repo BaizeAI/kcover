@@ -6,7 +6,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 	"recovery.baizeai.io/pkg/diagnosis"
-	"recovery.baizeai.io/pkg/diagnosis/containerlogs"
 	"recovery.baizeai.io/pkg/diagnosis/podstatus"
 	"recovery.baizeai.io/pkg/events"
 	"recovery.baizeai.io/pkg/runner"
@@ -27,13 +26,7 @@ func NewControllerDiagnostic(cli kubernetes.Interface, recorder events.Recorder)
 		return nil, fmt.Errorf("failed to create pod status collector: %v", err)
 	}
 
-	diagContainerLogsCollector, err := containerlogs.NewContainerLogDiagnostic(cli)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create container logs collector: %v", err)
-	}
-
 	diags = append(diags, diagPodCollector)
-	diags = append(diags, diagContainerLogsCollector)
 
 	if recorder == nil {
 		return nil, fmt.Errorf("recorder can not be nil")
