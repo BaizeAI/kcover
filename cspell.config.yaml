@@ -1,0 +1,32 @@
+version: "0.2"
+ignorePaths: []
+dictionaryDefinitions: []
+dictionaries: []
+words:
+  - apimachinery
+  - baizeai
+  - clientcmd
+  - containerlogs
+  - corev1
+  - CUDA
+  - CUDNN
+  - dcgm
+  - dcgmi
+  - exitcode
+  - Infof
+  - jellydator
+  - klog
+  - KUBECONFIG
+  - Kubeflow
+  - metav1
+  - NCCL
+  - nvidiadiag
+  - podstatus
+  - pytorchjobs
+  - samber
+  - stretchr
+  - tfjobs
+  - ttlcache
+  - Warningf
+ignoreWords: []
+import: []
