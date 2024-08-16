@@ -33,7 +33,7 @@ func main() {
 		Lock: &resourcelock.LeaseLock{
 			Client: coordinationv1client.NewForConfigOrDie(kube.GetK8sConfigConfigWithFile("", "")),
 			LeaseMeta: metav1.ObjectMeta{
-				Name: "fast-recovery",
+				Name: "kcover",
 				Namespace: func() string {
 					if bs, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
 						return string(bs)
@@ -69,13 +69,13 @@ func main() {
 					panic(err)
 				}
 
-				klog.Info("fast-recovery started")
+				klog.Info("kcover started")
 			},
 			OnStoppedLeading: func() {
 				rec.Stop()
 				diag.Stop()
 				eventBus.Stop()
-				klog.Info("fast-recovery stopped")
+				klog.Info("kcover stopped")
 			},
 		},
 	}

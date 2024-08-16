@@ -1,15 +1,15 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "fast-recovery.fullname" . }}-controller
+  name: {{ include "kcover.fullname" . }}-controller
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "fast-recovery.labels" . | nindent 4 }}
+    {{- include "kcover.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.controller.replicas }}
   selector:
     matchLabels:
-      app: {{ include "fast-recovery.fullname" . }}-controller
+      app: {{ include "kcover.fullname" . }}-controller
   strategy:
     rollingUpdate:
       maxSurge: 25%
@@ -22,13 +22,13 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       labels:
-        app: {{ include "fast-recovery.fullname" . }}-controller
+        app: {{ include "kcover.fullname" . }}-controller
     spec:
       {{- with .Values.controller.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "fast-recovery.serviceAccountName" . }}
+      serviceAccountName: {{ include "kcover.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.controller.podSecurityContext | nindent 8 }}
       containers:

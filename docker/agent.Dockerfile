@@ -12,7 +12,7 @@ RUN go mod download
 
 ADD . .
 
-RUN go build -ldflags "-s -w" -o fast-recovery-agent ./cmd/collector-controller
+RUN go build -ldflags "-s -w" -o kcover-agent ./cmd/collector-controller
 
 # runner
 FROM m.daocloud.io/docker.io/ubuntu:22.04
@@ -21,6 +21,6 @@ WORKDIR /app
 
 # todo install dcgm toolkit?
 
-COPY --from=builder /app/fast-recovery-agent fast-recovery-agent
+COPY --from=builder /app/kcover-agent kcover-agent
 
-CMD /app/fast-recovery-agent
+CMD /app/kcover-agent

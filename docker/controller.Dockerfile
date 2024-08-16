@@ -12,13 +12,13 @@ RUN go mod download
 
 ADD . .
 
-RUN go build -ldflags "-s -w" -o fast-recovery-controller ./cmd/fast-recovery
+RUN go build -ldflags "-s -w" -o kcover-controller ./cmd/kcover
 
 # runner
 FROM m.daocloud.io/docker.io/ubuntu:22.04
 
 WORKDIR /app
 
-COPY --from=builder /app/fast-recovery-controller fast-recovery-controller
+COPY --from=builder /app/kcover-controller kcover-controller
 
-CMD /app/fast-recovery-controller
+CMD /app/kcover-controller

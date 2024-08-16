@@ -6,7 +6,7 @@ const (
 	// recovery annotations
 	NeedRecoveryAnnotation = "recovery.baizeai.io/need-recovery"
 
-	EnabledRecoveryLabel = "recovery.baizeai.io/enabled"
+	EnabledRecoveryLabel = "kcover.io/cascading-recovery"
 
 	True = "true"
 )

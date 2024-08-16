@@ -35,7 +35,7 @@ func NewKubeEventsRecorder(cli kubernetes.Interface, watchEvent bool) Recorder {
 	eventBroadcaster.StartRecordingToSink(&v1.EventSinkImpl{
 		Interface: cli.CoreV1().Events(""),
 	})
-	recorder := eventBroadcaster.NewRecorder(runtime.NewScheme(), corev1.EventSource{Component: "fast-recovery"})
+	recorder := eventBroadcaster.NewRecorder(runtime.NewScheme(), corev1.EventSource{Component: "kcover"})
 	return &kubeEventsRecorder{
 		client:     cli,
 		eventChan:  make(chan CollectorEvent),

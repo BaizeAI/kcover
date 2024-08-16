@@ -1,14 +1,14 @@
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: {{ include "fast-recovery.fullname" . }}-agent
+  name: {{ include "kcover.fullname" . }}-agent
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "fast-recovery.labels" . | nindent 4 }}
+    {{- include "kcover.labels" . | nindent 4 }}
 spec:
   selector:
     matchLabels:
-      app: {{ include "fast-recovery.fullname" . }}-agent
+      app: {{ include "kcover.fullname" . }}-agent
   template:
     metadata:
       {{- with .Values.agent.podAnnotations }}
@@ -16,13 +16,13 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       labels:
-        app: {{ include "fast-recovery.fullname" . }}-agent
+        app: {{ include "kcover.fullname" . }}-agent
     spec:
       {{- with .Values.agent.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "fast-recovery.serviceAccountName" . }}
+      serviceAccountName: {{ include "kcover.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.agent.podSecurityContext | nindent 8 }}
       containers:

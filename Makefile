@@ -7,7 +7,7 @@ VERSION ?= dev-$(shell git rev-parse --short=8 HEAD)
 
 image-%:
 	 $(CONTAINER_CLI) buildx build \
- 		-t $(HUB)/fast-recovery-$*:$(VERSION) \
+ 		-t $(HUB)/kcover-$*:$(VERSION) \
  		-f docker/$*.Dockerfile \
  		--push \
  		--platform linux/amd64,linux/arm64 \
