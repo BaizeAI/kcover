@@ -43,26 +43,49 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker meta
-        id: meta
+      - name: Docker meta Controller
+        id: controller_meta
         uses: docker/metadata-action@v4
         with:
           images: |
-            ghcr.io/baizeai/snapshot-controller
+            ghcr.io/baizeai/kcover-controller
           tags: |
             type=semver,pattern={{raw}}
 
-      - name: Build
+      - name: Docker meta Agent
+        id: agent_meta
+        uses: docker/metadata-action@v4
+        with:
+          images: |
+            ghcr.io/baizeai/kcover-agent
+          tags: |
+            type=semver,pattern={{raw}}
+
+      - name: Build Image Controller
         uses: docker/build-push-action@v4
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
           provenance: false
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.controller_meta.outputs.tags }}
+          labels: ${{ steps.controller_meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          file: docker/controller.Dockerfile
+
+      - name: Build Image Agent
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          tags: ${{ steps.agent_meta.outputs.tags }}
+          labels: ${{ steps.agent_meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          file: docker/agent.Dockerfile
 
   publish-chart:
     if: startsWith(github.ref, 'refs/tags/v')
