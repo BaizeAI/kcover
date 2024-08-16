@@ -1,5 +1,5 @@
 # builder
-FROM m.daocloud.io/docker.io/golang:1.22.2 as builder
+FROM --platform=$BUILDPLATFORM m.daocloud.io/docker.io/golang:1.22.2 as builder
 
 WORKDIR /app
 
@@ -12,7 +12,8 @@ RUN go mod download
 
 ADD . .
 
-RUN go build -ldflags "-s -w" -o kcover-controller ./cmd/kcover
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -ldflags "-s -w" -o kcover-controller ./cmd/kcover
 
 # runner
 FROM m.daocloud.io/docker.io/ubuntu:22.04
