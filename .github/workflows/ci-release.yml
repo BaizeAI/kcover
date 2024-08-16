@@ -9,7 +9,6 @@ on:
 jobs:
   go-unit-test:
     runs-on: ubuntu-20.04
-    needs: [style-check]
     steps:
     - uses: actions/checkout@v3
     - name: Set up Go
