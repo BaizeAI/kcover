@@ -1,8 +1,8 @@
 package diagnosis
 
 import (
-	"recovery.baizeai.io/pkg/events"
-	"recovery.baizeai.io/pkg/runner"
+	"github.com/baizeai/kcover/pkg/events"
+	"github.com/baizeai/kcover/pkg/runner"
 )
 
 type Diagnostic interface {

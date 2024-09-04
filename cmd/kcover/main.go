@@ -5,17 +5,17 @@ import (
 	"os"
 	"time"
 
+	"github.com/baizeai/kcover/pkg/diagnosis/controller"
+	"github.com/baizeai/kcover/pkg/events"
+	"github.com/baizeai/kcover/pkg/kube"
+	"github.com/baizeai/kcover/pkg/recovery"
+	"github.com/baizeai/kcover/pkg/runner"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	coordinationv1client "k8s.io/client-go/kubernetes/typed/coordination/v1"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/klog/v2"
-	"recovery.baizeai.io/pkg/diagnosis/controller"
-	"recovery.baizeai.io/pkg/events"
-	"recovery.baizeai.io/pkg/kube"
-	"recovery.baizeai.io/pkg/recovery"
-	"recovery.baizeai.io/pkg/runner"
 )
 
 func main() {

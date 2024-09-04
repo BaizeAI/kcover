@@ -7,13 +7,13 @@ import (
 
 	"github.com/samber/lo"
 
+	"github.com/baizeai/kcover/pkg/constants"
+	"github.com/baizeai/kcover/pkg/events"
 	"github.com/jellydator/ttlcache/v3"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
-	"recovery.baizeai.io/pkg/constants"
-	"recovery.baizeai.io/pkg/events"
 )
 
 type RecoveryController struct {

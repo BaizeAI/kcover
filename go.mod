@@ -1,4 +1,4 @@
-module recovery.baizeai.io
+module github.com/baizeai/kcover
 
 go 1.22.0
 

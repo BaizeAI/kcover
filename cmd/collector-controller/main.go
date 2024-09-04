@@ -5,12 +5,12 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/baizeai/kcover/pkg/diagnosis"
+	"github.com/baizeai/kcover/pkg/diagnosis/nvidiadiag"
+	"github.com/baizeai/kcover/pkg/events"
+	"github.com/baizeai/kcover/pkg/kube"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
-	"recovery.baizeai.io/pkg/diagnosis"
-	"recovery.baizeai.io/pkg/diagnosis/nvidiadiag"
-	"recovery.baizeai.io/pkg/events"
-	"recovery.baizeai.io/pkg/kube"
 )
 
 func main() {

@@ -1,6 +1,6 @@
 package events
 
-import "recovery.baizeai.io/pkg/runner"
+import "github.com/baizeai/kcover/pkg/runner"
 
 type TargetType string
 

@@ -5,14 +5,14 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/baizeai/kcover/pkg/constants"
+	"github.com/baizeai/kcover/pkg/diagnosis"
+	"github.com/baizeai/kcover/pkg/events"
+	"github.com/baizeai/kcover/pkg/runner"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
-	"recovery.baizeai.io/pkg/constants"
-	"recovery.baizeai.io/pkg/diagnosis"
-	"recovery.baizeai.io/pkg/events"
-	"recovery.baizeai.io/pkg/runner"
 )
 
 var _ runner.Runner = (*podStatusCollector)(nil)

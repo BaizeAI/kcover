@@ -3,12 +3,12 @@ package controller
 import (
 	"fmt"
 
+	"github.com/baizeai/kcover/pkg/diagnosis"
+	"github.com/baizeai/kcover/pkg/diagnosis/podstatus"
+	"github.com/baizeai/kcover/pkg/events"
+	"github.com/baizeai/kcover/pkg/runner"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
-	"recovery.baizeai.io/pkg/diagnosis"
-	"recovery.baizeai.io/pkg/diagnosis/podstatus"
-	"recovery.baizeai.io/pkg/events"
-	"recovery.baizeai.io/pkg/runner"
 )
 
 var _ runner.Runner = (*controllerDiagnostic)(nil)
