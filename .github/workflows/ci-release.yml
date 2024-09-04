@@ -17,14 +17,7 @@ jobs:
         go-version: 1.22.2
     - name: Test
       run: make test
-    - uses: codecov/codecov-action@v3.1.4
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }} # not required for public repos
-        files: ./cover.out # optional
-        flags: unittests # optional
-        name: codecov-umbrella # optional
-        fail_ci_if_error: true # optional (default = false)
-        verbose: true # optional (default = false)
+
   docker-build:
     runs-on: ubuntu-latest
     needs: [go-unit-test]
