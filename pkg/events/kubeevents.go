@@ -56,8 +56,12 @@ func (a *kubeEventsRecorder) Start() error {
 	_, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			event := obj.(*corev1.Event)
-			if event.LastTimestamp.Add(3 * time.Minute).Before(time.Now()) {
-				klog.Infof("event %s is too old, ignore it", event.Name)
+			eventTimestamp := event.LastTimestamp
+			if eventTimestamp.IsZero() {
+				eventTimestamp = event.CreationTimestamp
+			}
+			if eventTimestamp.Add(3 * time.Minute).Before(time.Now()) {
+				klog.Infof("event %s is too old %s against %s, ignore it", event.Name, eventTimestamp.String(), time.Now().String())
 				return
 			}
 			if event.Annotations[constants.NeedRecoveryAnnotation] == "true" {

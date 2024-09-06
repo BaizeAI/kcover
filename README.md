@@ -29,6 +29,7 @@ Configure `kcover` to monitor specific Kubernetes resources by labeling them:
 
 ```shell
 kubectl label pytorchjobs <job-name> kcover.io/cascading-recovery=true
+kubectl label pytorchjobs <job-name> kcover.io/need-recovery=true
 ```
 
 ## Usage
