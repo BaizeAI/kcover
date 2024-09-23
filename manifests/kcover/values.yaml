@@ -16,9 +16,12 @@ serviceAccount:
   # If not set and create is true, a name is generated using the fullname template
   name: ""
 
+global:
+  imageRegistry: ghcr.io
+
 agent:
   image:
-    registry: ghcr.io
+    registry: ''
     repository: baizeai/kcover-agent
     pullPolicy: IfNotPresent
     # Overrides the image tag whose default is the chart appVersion.
@@ -76,7 +79,7 @@ agent:
 
 controller:
   image:
-    registry: ghcr.io
+    registry: ''
     repository: baizeai/kcover-controller
     pullPolicy: IfNotPresent
     # Overrides the image tag whose default is the chart appVersion.

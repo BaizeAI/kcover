@@ -33,7 +33,7 @@ spec:
         {{- toYaml .Values.controller.podSecurityContext | nindent 8 }}
       containers:
         - name: controller-container
-          image: "{{ .Values.controller.image.registry }}/{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag | default .Chart.AppVersion }}"
+          image: {{ template "controller.image" . }}
           imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
           env:
             - name: FAST_RECOVERY_NODE_NAME

@@ -29,7 +29,7 @@ spec:
         - name: agent
           securityContext:
             {{- toYaml .Values.agent.securityContext | nindent 12 }}
-          image: "{{ .Values.agent.image.registry }}/{{ .Values.agent.image.repository }}:{{ .Values.agent.image.tag | default .Chart.AppVersion }}"
+          image: {{ template "agent.image" . }}
           imagePullPolicy: {{ .Values.agent.image.pullPolicy }}
           env:
             - name: FAST_RECOVERY_NODE_NAME
