@@ -60,3 +60,11 @@ Create the name of the service account to use
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{- define "controller.image" -}}
+{{ include "common.images.image" (dict "imageRoot" .Values.controller.image "global" .Values.global "defaultTag" .Chart.Version) }}
+{{- end -}}
+
+{{- define "agent.image" -}}
+{{ include "common.images.image" (dict "imageRoot" .Values.agent.image "global" .Values.global "defaultTag" .Chart.Version) }}
+{{- end -}}
