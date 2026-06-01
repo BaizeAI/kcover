@@ -22,6 +22,7 @@ push-controller:
 		-t $(HUB)/kcover-controller:$(VERSION) \
 		-f docker/kcover.Dockerfile \
 		--push \
+		--provenance=false \
 		--platform $(CONTROLLER_PUSH_PLATFORMS) \
 		.
 
@@ -51,6 +52,7 @@ push-agent:
 		-f docker/agent.Dockerfile \
 		--build-arg MX_SMI_IMAGE=$(MX_SMI_IMAGE) \
 		--push \
+		--provenance=false \
 		--platform $(AGENT_PUSH_PLATFORMS) \
 		.
 
