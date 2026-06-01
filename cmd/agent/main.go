@@ -65,15 +65,16 @@ func run() error {
 	}
 	defer detector.Stop()
 
-	observer, err := newPreflightObserver(client, sink, hostName)
+	if err := detector.Start(); err != nil {
+		return fmt.Errorf("start node detector: %w", err)
+	}
+
+	observer, err := newPreflightObserver(client, sink, hostName, node.Vendor(cfg.Vendor))
 	if err != nil {
 		return fmt.Errorf("create preflight pod observer: %w", err)
 	}
 	defer observer.Stop()
 
-	if err := detector.Start(); err != nil {
-		return fmt.Errorf("start node detector: %w", err)
-	}
 	if err := observer.Start(); err != nil {
 		return fmt.Errorf("start preflight pod observer: %w", err)
 	}

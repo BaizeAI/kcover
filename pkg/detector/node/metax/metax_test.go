@@ -270,6 +270,15 @@ func TestStopClosesEventChannelAfterStartGoroutineExits(t *testing.T) {
 	}
 }
 
+func TestStartReturnsErrorForInvalidDay2Schedule(t *testing.T) {
+	t.Parallel()
+
+	instance := NewDetector(kcoverconfig.MetaX{NodeName: "node-a", Day2CheckTime: "invalid"}, 5, fake.NewSimpleClientset())
+	if err := instance.Start(); err == nil {
+		t.Fatal("Start() error = nil, want error for invalid day2 schedule")
+	}
+}
+
 func TestParseHotspotTemperatures(t *testing.T) {
 	t.Parallel()
 

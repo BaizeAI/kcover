@@ -7,7 +7,7 @@ import (
 
 const (
 	DefaultPath                = "/etc/kcover-agent/config.yaml"
-	DefaultVendor              = 1
+	DefaultVendor              = 1 // Nvidia
 	DefaultInterval            = 5
 	DefaultMetaXDay2CheckTime  = "10:00"
 	DefaultMetaXGPUNum         = 8

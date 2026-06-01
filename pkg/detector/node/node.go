@@ -18,8 +18,8 @@ type Vendor int
 
 const (
 	_ Vendor = iota
-	MetaX
 	Nvidia
+	MetaX
 )
 
 var _ runner.Runner = (*detector)(nil)

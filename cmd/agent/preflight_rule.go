@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/baizeai/kcover/pkg/constants"
+	"github.com/baizeai/kcover/pkg/detector/node"
 	"github.com/baizeai/kcover/pkg/events"
 	"github.com/baizeai/kcover/pkg/podobserver"
 	"github.com/baizeai/kcover/pkg/preflight"
@@ -24,7 +25,29 @@ type preflightRule struct {
 	baseDir string
 }
 
-func newPreflightObserver(cli kubernetes.Interface, sink events.Sink, nodeName string) (runner.Runner, error) {
+type nvidiaPreflightObserver struct{}
+
+var _ runner.Runner = nvidiaPreflightObserver{}
+
+func newPreflightObserver(cli kubernetes.Interface, sink events.Sink, nodeName string, vendor node.Vendor) (runner.Runner, error) {
+	switch vendor {
+	case node.MetaX:
+		return newMetaXPreflightObserver(cli, sink, nodeName)
+	case node.Nvidia:
+		return nvidiaPreflightObserver{}, nil
+	default:
+		return nil, fmt.Errorf("unsupported vendor: %d", vendor)
+	}
+}
+
+func (nvidiaPreflightObserver) Start() error {
+	klog.V(2).InfoS("preflight pod observer placeholder started", "vendor", node.Nvidia)
+	return nil
+}
+
+func (nvidiaPreflightObserver) Stop() {}
+
+func newMetaXPreflightObserver(cli kubernetes.Interface, sink events.Sink, nodeName string) (runner.Runner, error) {
 	observer, err := podobserver.NewForNode(cli, sink, "preflight pod observer", nodeName, preflightRule{baseDir: preflightReportDir})
 	if err != nil {
 		return nil, fmt.Errorf("create preflight pod observer: %w", err)

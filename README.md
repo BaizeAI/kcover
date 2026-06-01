@@ -60,11 +60,43 @@ agent:
         hcaIDs:
           - mlx5_0
           - mlx5_1
-        day2CheckHour: 10
+        day2CheckTime: "10:00"
         gpuNum: 8
         temperature: 85
         eccMaxCount: 64
         ntpMaxOffsetMillis: 10
+```
+
+The default vendor is Nvidia (`vendor: 1`). To switch the agent to MetaX,
+set `agent.config.data.vendor` to `2`. MetaX-specific day2 checks and
+preflight report collection are enabled automatically for the MetaX vendor.
+
+Install with MetaX enabled:
+
+```shell
+helm install kcover baizeai/kcover \
+  --namespace kcover-system \
+  --create-namespace \
+  --set agent.config.data.vendor=2
+```
+
+Switch an existing release to MetaX:
+
+```shell
+helm upgrade kcover baizeai/kcover \
+  --namespace kcover-system \
+  --reuse-values \
+  --set agent.config.data.vendor=2
+```
+
+If your MetaX nodes require HCA checks, set the HCA IDs as chart values too:
+
+```shell
+helm upgrade kcover baizeai/kcover \
+  --namespace kcover-system \
+  --reuse-values \
+  --set agent.config.data.vendor=2 \
+  --set-json 'agent.config.data.metaX.hcaIDs=["mlx5_0","mlx5_1"]'
 ```
 
 If `metaX.hcaIDs` is set, the agent runs `ibv_devinfo` and requires every
