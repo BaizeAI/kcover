@@ -119,6 +119,35 @@ func TestLoadReportPayloadCompactsToMinimalManagerFields(t *testing.T) {
 	}
 }
 
+func TestLoadReportPayloadDropsEmptyBusBWThreshold(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	path := filepath.Join(baseDir, "default")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	reportPath := filepath.Join(path, "worker-0.json")
+	raw := `{"version":1,"workload":"job-a","workload_size":2,"rank":0,"node_name":"node-a","node_ip":"10.0.0.1","gpu_check":1,"storage_check":1,"node_check_busbw_threshold_gbps":"  ","batches":[{"batch_idx":0,"pair":["10.0.0.1","10.0.0.2"],"self_ip":"10.0.0.1","allreduce_ms":0.5,"world_size":16,"allreduce_shape":16777216,"dtype_bytes":4}]}`
+	if err := os.WriteFile(reportPath, []byte(raw), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	payload, _, err := LoadReportPayload(baseDir, "default", "worker-0")
+	if err != nil {
+		t.Fatalf("LoadReportPayload() error = %v", err)
+	}
+
+	var compact map[string]any
+	if err := json.Unmarshal([]byte(payload), &compact); err != nil {
+		t.Fatalf("json.Unmarshal(payload) error = %v", err)
+	}
+	if _, exists := compact["node_check_busbw_threshold_gbps"]; exists {
+		t.Fatal("compact payload unexpectedly keeps empty busbw threshold")
+	}
+}
+
 func TestReportPath(t *testing.T) {
 	t.Parallel()
 

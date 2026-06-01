@@ -3,6 +3,8 @@ package constants
 const (
 	KubeflowJobLabel                  = "training.kubeflow.org/job-name"
 	LeaderWorkerSetNameLabel          = "leaderworkerset.sigs.k8s.io/name"
+	LeaderWorkerSetGroupIndexLabel    = "leaderworkerset.sigs.k8s.io/group-index"
+	LeaderWorkerSetWorkerIndexLabel   = "leaderworkerset.sigs.k8s.io/worker-index"
 	BatchJobNameLabel                 = "batch.kubernetes.io/job-name"
 	BatchJobCompletionIndexAnnotation = "batch.kubernetes.io/job-completion-index"
 	PreflightLabel                    = "kcover.io/preflight"

@@ -753,6 +753,10 @@ func extractBusBWThreshold(payload map[string]any) (float64, error) {
 	if !ok {
 		return 0, fmt.Errorf("invalid %s: unsupported type %T", busbwThreshold, threshold)
 	}
+	thresholdText = strings.TrimSpace(thresholdText)
+	if thresholdText == "" {
+		return DefaultBusBWThresholdGBPS, nil
+	}
 
 	value, err := strconv.ParseFloat(thresholdText, 64)
 	if err != nil {

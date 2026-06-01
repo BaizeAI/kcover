@@ -180,6 +180,18 @@ func TestPairFieldSortsIPsAscending(t *testing.T) {
 	}
 }
 
+func TestExtractBusBWThresholdUsesDefaultForEmptyString(t *testing.T) {
+	t.Parallel()
+
+	got, err := extractBusBWThreshold(map[string]any{busbwThreshold: "  "})
+	if err != nil {
+		t.Fatalf("extractBusBWThreshold(...) error = %v", err)
+	}
+	if got != DefaultBusBWThresholdGBPS {
+		t.Fatalf("extractBusBWThreshold(...) = %v, want %v", got, DefaultBusBWThresholdGBPS)
+	}
+}
+
 func TestSlowNodeAggregatorDetectsSlowNodeFromBatchIntersection(t *testing.T) {
 	t.Parallel()
 

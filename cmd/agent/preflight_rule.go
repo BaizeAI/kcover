@@ -17,7 +17,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// /var/lib/kcover/preflight/<namespace>/<JOB_NAME>-<PET_NODE_RANK>.json
+// /var/lib/kcover/preflight/<namespace>/<workload-name>-<rank>.json
 const preflightReportDir = "/var/lib/kcover/preflight"
 const preflightInitContainerName = "preflight"
 
@@ -106,10 +106,19 @@ func preflightWorkloadName(pod *corev1.Pod) string {
 		return ""
 	}
 	if name := labels[constants.LeaderWorkerSetNameLabel]; name != "" {
-		return name
+		return lwsWorkloadName(name, labels)
 	}
 
 	return labels[constants.BatchJobNameLabel]
+}
+
+func lwsWorkloadName(name string, labels map[string]string) string {
+	groupIndex := strings.TrimSpace(labels[constants.LeaderWorkerSetGroupIndexLabel])
+	if !isNumeric(groupIndex) {
+		return ""
+	}
+
+	return name + "-" + groupIndex
 }
 
 func preflightReportName(pod *corev1.Pod, workloadName string) (string, bool) {
@@ -117,23 +126,22 @@ func preflightReportName(pod *corev1.Pod, workloadName string) (string, bool) {
 		return "", false
 	}
 
-	rank, ok := preflightRank(pod, workloadName)
+	reportSuffix, ok := preflightReportSuffix(pod, workloadName)
 	if !ok {
 		return "", false
 	}
 
-	return fmt.Sprintf("%s-%s", workloadName, rank), true
+	return fmt.Sprintf("%s-%s", workloadName, reportSuffix), true
 }
 
-func preflightRank(pod *corev1.Pod, workloadName string) (string, bool) {
+func preflightReportSuffix(pod *corev1.Pod, workloadName string) (string, bool) {
 	if pod == nil || workloadName == "" {
 		return "", false
 	}
 
 	labels := pod.Labels
 	if labels[constants.LeaderWorkerSetNameLabel] != "" {
-		// TODO: derive LWS rank from authoritative workload metadata when available.
-		return petNodeRankFromPodName(pod.Name, workloadName)
+		return lwsReportSuffix(labels)
 	}
 
 	annotations := pod.Annotations
@@ -148,30 +156,28 @@ func preflightRank(pod *corev1.Pod, workloadName string) (string, bool) {
 	return raw, true
 }
 
-func petNodeRankFromPodName(podName, workloadName string) (string, bool) {
-	if podName == "" || workloadName == "" {
-		return "", false
+func lwsReportSuffix(labels map[string]string) (string, bool) {
+	groupIndex := strings.TrimSpace(labels[constants.LeaderWorkerSetGroupIndexLabel])
+	workerIndex := strings.TrimSpace(labels[constants.LeaderWorkerSetWorkerIndexLabel])
+	if isNumeric(groupIndex) && isNumeric(workerIndex) {
+		return workerIndex, true
 	}
 
-	prefix := workloadName + "-"
-	if !strings.HasPrefix(podName, prefix) {
-		return "", false
+	return "", false
+}
+
+func isNumeric(raw string) bool {
+	if raw == "" {
+		return false
 	}
 
-	suffix := strings.TrimPrefix(podName, prefix)
-	index := strings.LastIndex(suffix, "-")
-	if index < 0 || index+1 >= len(suffix) {
-		return "", false
-	}
-
-	rank := suffix[index+1:]
-	for _, ch := range rank {
+	for _, ch := range raw {
 		if ch < '0' || ch > '9' {
-			return "", false
+			return false
 		}
 	}
 
-	return rank, true
+	return true
 }
 
 func shouldHandlePodUpdate(oldPod, newPod *corev1.Pod) bool {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/baizeai/kcover/pkg/constants"
 	"github.com/baizeai/kcover/pkg/events"
@@ -121,7 +122,9 @@ func compactReportPayloadToJSON(payload compactReportPayload) (string, string, e
 		"gpu_check":     report.GPUCheck,
 		"storage_check": report.StorageCheck,
 	}
-	if threshold, ok := raw["node_check_busbw_threshold_gbps"]; ok {
+	if threshold, ok, err := compactBusBWThreshold(raw); err != nil {
+		return "", "", err
+	} else if ok {
 		compact["node_check_busbw_threshold_gbps"] = threshold
 	}
 
@@ -153,6 +156,25 @@ func compactReportPayloadToJSON(payload compactReportPayload) (string, string, e
 	}
 
 	return string(encoded), report.NodeName, nil
+}
+
+func compactBusBWThreshold(raw map[string]any) (string, bool, error) {
+	threshold, ok := raw[busbwThreshold]
+	if !ok {
+		return "", false, nil
+	}
+
+	thresholdText, ok := threshold.(string)
+	if !ok {
+		return "", false, fmt.Errorf("invalid %s: unsupported type %T", busbwThreshold, threshold)
+	}
+
+	thresholdText = strings.TrimSpace(thresholdText)
+	if thresholdText == "" {
+		return "", false, nil
+	}
+
+	return thresholdText, true, nil
 }
 
 func copyIfPresent(dst, src map[string]any, key string) {
