@@ -76,7 +76,7 @@ func (r preflightRule) OnUpdate(oldPod, newPod *corev1.Pod) []events.Event {
 		return nil
 	}
 
-	reportText, nodeName, err := preflight.LoadReportPayload(r.baseDir, newPod.Namespace, reportName)
+	reportText, nodeName, err := loadPreflightReportPayload(r.baseDir, newPod.Namespace, reportName, nodeName)
 	if err != nil {
 		klog.V(4).InfoS("failed to load preflight report", "namespace", newPod.Namespace, "pod", newPod.Name, "report", reportName, "node", nodeName, "error", err)
 		return nil
@@ -94,6 +94,26 @@ func (r preflightRule) OnUpdate(oldPod, newPod *corev1.Pod) []events.Event {
 	klog.V(3).InfoS("prepare preflight delivery event", "namespace", event.Namespace, "pod", newPod.Name, "node", event.Name, "workload", workloadName)
 
 	return []events.Event{event}
+}
+
+func loadPreflightReportPayload(baseDir, namespace, reportName, nodeName string) (string, string, error) {
+	nodeName = strings.TrimSpace(nodeName)
+	if nodeName == "" {
+		return "", "", fmt.Errorf("preflight report node name is empty")
+	}
+
+	reportText, ok := reports[nodeName]
+	if !ok || strings.TrimSpace(reportText) == "" {
+		return "", nodeName, fmt.Errorf("report for node %q not found in temp reports", nodeName)
+	}
+
+	// Temporary disable file-based report loading and use temp.go fixtures instead.
+	// return preflight.LoadReportPayload(baseDir, namespace, reportName)
+	_ = baseDir
+	_ = namespace
+	_ = reportName
+
+	return reportText, nodeName, nil
 }
 
 func preflightWorkloadName(pod *corev1.Pod) string {
@@ -181,6 +201,7 @@ func isNumeric(raw string) bool {
 }
 
 func shouldHandlePodUpdate(oldPod, newPod *corev1.Pod) bool {
+	return true
 	if newPod == nil {
 		return false
 	}
