@@ -143,28 +143,7 @@ func (c *SlowNodeAggregator) AddReport(ns, workloadName, reportText string) (rea
 	if expired, ok := c.expireWorkloadIfTimedOut(key, now); ok {
 		return false, nil, expired
 	}
-	wkl, ok := c.workloads[key]
-	if !ok {
-		wkl = &workload{
-			expectedReportCount: plan.reportCount,
-			expectedBatchCount:  plan.batchCount,
-			nodeReports:         make(map[nodeName]nodeReport, plan.reportCount),
-			lastReportAt:        now,
-		}
-		c.workloads[key] = wkl
-	}
-
-	if wkl.expectedReportCount != plan.reportCount || wkl.expectedBatchCount != plan.batchCount {
-		return false, nil, fmt.Errorf(
-			"inconsistent preflight layout for %s/%s: got %d reports/%d batches, want %d reports/%d batches",
-			ns,
-			workloadName,
-			plan.reportCount,
-			plan.batchCount,
-			wkl.expectedReportCount,
-			wkl.expectedBatchCount,
-		)
-	}
+	wkl := c.workloadForReport(key, plan, now)
 
 	failFast := report.GPUCheck == CheckResultFail || report.StorageCheck == CheckResultFail
 	if !failFast && len(batchResults) == 0 {
@@ -187,6 +166,42 @@ func (c *SlowNodeAggregator) AddReport(ns, workloadName, reportText string) (rea
 
 	delete(c.workloads, key)
 	return true, slowNodes, nil
+}
+
+func (c *SlowNodeAggregator) workloadForReport(key workloadKey, plan workloadPlan, now time.Time) *workload {
+	wkl, ok := c.workloads[key]
+	if !ok {
+		return c.ensureWorkload(key, plan, now)
+	}
+	if wkl.isSamePlan(plan) {
+		return wkl
+	}
+
+	klog.Warningf(
+		"preflight layout changed for %s/%s: got %d reports/%d batches, resetting previous %d reports/%d batches state",
+		key.namespace,
+		key.workloadName,
+		plan.reportCount,
+		plan.batchCount,
+		wkl.expectedReportCount,
+		wkl.expectedBatchCount,
+	)
+	return c.ensureWorkload(key, plan, now)
+}
+
+func (c *SlowNodeAggregator) ensureWorkload(key workloadKey, plan workloadPlan, now time.Time) *workload {
+	wkl := &workload{
+		expectedReportCount: plan.reportCount,
+		expectedBatchCount:  plan.batchCount,
+		nodeReports:         make(map[nodeName]nodeReport, plan.reportCount),
+		lastReportAt:        now,
+	}
+	c.workloads[key] = wkl
+	return wkl
+}
+
+func (w *workload) isSamePlan(plan workloadPlan) bool {
+	return w.expectedReportCount == plan.reportCount && w.expectedBatchCount == plan.batchCount
 }
 
 func (c *SlowNodeAggregator) expireWorkloadIfTimedOut(key workloadKey, now time.Time) (WorkloadTimeoutError, bool) {
@@ -752,6 +767,10 @@ func extractBusBWThreshold(payload map[string]any) (float64, error) {
 	thresholdText, ok := threshold.(string)
 	if !ok {
 		return 0, fmt.Errorf("invalid %s: unsupported type %T", busbwThreshold, threshold)
+	}
+	thresholdText = strings.TrimSpace(thresholdText)
+	if thresholdText == "" {
+		return DefaultBusBWThresholdGBPS, nil
 	}
 
 	value, err := strconv.ParseFloat(thresholdText, 64)

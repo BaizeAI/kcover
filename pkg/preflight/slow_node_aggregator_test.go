@@ -180,6 +180,54 @@ func TestPairFieldSortsIPsAscending(t *testing.T) {
 	}
 }
 
+func TestSlowNodeAggregator_LayoutChangeResetsStaleWorkload(t *testing.T) {
+	t.Parallel()
+
+	aggregator := NewSlowNodeAggregator(0)
+	staleReport := `{"version":1,"workload":"job-a","workload_size":4,"rank":0,"node_name":"node-a","node_ip":"10.0.0.1","gpu_check":1,"storage_check":1,"batches":[{"batch_idx":0,"pair":["10.0.0.1","10.0.0.2"],"self_ip":"10.0.0.1","status":"fail"}]}`
+	newReportA := `{"version":1,"workload":"job-a","workload_size":2,"rank":0,"node_name":"node-a","node_ip":"10.0.0.1","gpu_check":0,"storage_check":1,"batches":[]}`
+	newReportB := `{"version":1,"workload":"job-a","workload_size":2,"rank":1,"node_name":"node-b","node_ip":"10.0.0.2","gpu_check":1,"storage_check":1,"batches":[{"batch_idx":0,"pair":["10.0.0.1","10.0.0.2"],"self_ip":"10.0.0.2","status":"skip"}]}`
+
+	ready, _, err := aggregator.AddReport("default", "job-a", staleReport)
+	if err != nil {
+		t.Fatalf("aggregator.AddReport(staleReport) error = %v", err)
+	}
+	if ready {
+		t.Fatal("aggregator.AddReport(staleReport) ready = true, want false")
+	}
+
+	ready, _, err = aggregator.AddReport("default", "job-a", newReportA)
+	if err != nil {
+		t.Fatalf("aggregator.AddReport(newReportA) error = %v", err)
+	}
+	if ready {
+		t.Fatal("aggregator.AddReport(newReportA) ready = true, want false")
+	}
+
+	ready, slowNodes, err := aggregator.AddReport("default", "job-a", newReportB)
+	if err != nil {
+		t.Fatalf("aggregator.AddReport(newReportB) error = %v", err)
+	}
+	if !ready {
+		t.Fatal("aggregator.AddReport(newReportB) ready = false, want true")
+	}
+	if !reflect.DeepEqual(slowNodes, []string{"node-a", "node-b"}) {
+		t.Fatalf("aggregator.AddReport(newReportB) slowNodes = %v, want [node-a node-b]", slowNodes)
+	}
+}
+
+func TestExtractBusBWThresholdUsesDefaultForEmptyString(t *testing.T) {
+	t.Parallel()
+
+	got, err := extractBusBWThreshold(map[string]any{busbwThreshold: "  "})
+	if err != nil {
+		t.Fatalf("extractBusBWThreshold(...) error = %v", err)
+	}
+	if got != DefaultBusBWThresholdGBPS {
+		t.Fatalf("extractBusBWThreshold(...) = %v, want %v", got, DefaultBusBWThresholdGBPS)
+	}
+}
+
 func TestSlowNodeAggregatorDetectsSlowNodeFromBatchIntersection(t *testing.T) {
 	t.Parallel()
 
