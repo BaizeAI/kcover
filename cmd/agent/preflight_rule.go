@@ -202,14 +202,15 @@ func shouldHandlePodUpdate(oldPod, newPod *corev1.Pod) bool {
 		oldStatuses = oldPod.Status.InitContainerStatuses
 	}
 
-	return isPreflightFailed(oldStatuses, newPod.Status.InitContainerStatuses)
+	return isPreflightCompleted(oldStatuses, newPod.Status.InitContainerStatuses)
 }
 
-// isPreflightFailed returns true only when the init container named "preflight"
-// transitions from non-failed (or missing) to failed on this update.
-func isPreflightFailed(oldStatuses, newStatuses []corev1.ContainerStatus) bool {
+// isPreflightCompleted returns true only when the init container
+// named "preflight" transitions from non-terminated (or missing) to
+// terminated on this update.
+func isPreflightCompleted(oldStatuses, newStatuses []corev1.ContainerStatus) bool {
 	newStatus, ok := initContainerStatusByName(newStatuses, preflightInitContainerName)
-	if !ok || !initContainerFailed(newStatus) {
+	if !ok || !initContainerTerminated(newStatus) {
 		return false
 	}
 
@@ -218,11 +219,11 @@ func isPreflightFailed(oldStatuses, newStatuses []corev1.ContainerStatus) bool {
 		return true
 	}
 
-	return !initContainerFailed(oldStatus)
+	return !initContainerTerminated(oldStatus)
 }
 
-func initContainerFailed(status corev1.ContainerStatus) bool {
-	return status.State.Terminated != nil && status.State.Terminated.ExitCode != 0
+func initContainerTerminated(status corev1.ContainerStatus) bool {
+	return status.State.Terminated != nil
 }
 
 func initContainerStatusByName(statuses []corev1.ContainerStatus, name string) (corev1.ContainerStatus, bool) {

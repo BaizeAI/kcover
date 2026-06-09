@@ -60,7 +60,7 @@ func TestShouldHandlePreflightPodUpdate(t *testing.T) {
 		Status: corev1.PodStatus{
 			InitContainerStatuses: []corev1.ContainerStatus{{
 				Name:  "preflight",
-				State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}},
+				State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
 			}},
 		},
 	}
@@ -69,7 +69,7 @@ func TestShouldHandlePreflightPodUpdate(t *testing.T) {
 	newPod.ObjectMeta.Labels = map[string]string{constants.PreflightLabel: constants.True}
 	newPod.Status.InitContainerStatuses = []corev1.ContainerStatus{{
 		Name:  "preflight",
-		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 1}},
+		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}},
 	}}
 
 	if !shouldHandlePodUpdate(oldPod, newPod) {
@@ -82,37 +82,54 @@ func TestShouldHandlePreflightPodUpdate(t *testing.T) {
 	}
 }
 
-func TestIsPreflightFailed(t *testing.T) {
+func TestIsPreflightCompletedTransition(t *testing.T) {
 	t.Parallel()
 
 	oldStatuses := []corev1.ContainerStatus{{
 		Name:  "preflight",
-		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}},
+		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
 	}}
 	newStatuses := []corev1.ContainerStatus{{
 		Name:  "preflight",
 		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 1}},
 	}}
 
-	if !isPreflightFailed(oldStatuses, newStatuses) {
-		t.Fatal("isPreflightFailed(oldStatuses, newStatuses) = false, want true")
+	if !isPreflightCompleted(oldStatuses, newStatuses) {
+		t.Fatal("isPreflightCompletedTransition(oldStatuses, newStatuses) = false, want true")
 	}
 }
 
-func TestIsPreflightFailedRequiresExactPreflightName(t *testing.T) {
+func TestIsPreflightCompletedTransitionRequiresExactPreflightName(t *testing.T) {
 	t.Parallel()
 
 	oldStatuses := []corev1.ContainerStatus{{
 		Name:  "other-init",
-		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}},
+		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
 	}}
 	newStatuses := []corev1.ContainerStatus{{
 		Name:  "other-init",
 		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 1}},
 	}}
 
-	if isPreflightFailed(oldStatuses, newStatuses) {
-		t.Fatal("isPreflightFailed(oldStatuses, newStatuses) = true, want false")
+	if isPreflightCompleted(oldStatuses, newStatuses) {
+		t.Fatal("isPreflightCompletedTransition(oldStatuses, newStatuses) = true, want false")
+	}
+}
+
+func TestIsPreflightCompletedTransitionWithSucceededStatus(t *testing.T) {
+	t.Parallel()
+
+	oldStatuses := []corev1.ContainerStatus{{
+		Name:  "preflight",
+		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+	}}
+	newStatuses := []corev1.ContainerStatus{{
+		Name:  "preflight",
+		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}},
+	}}
+
+	if !isPreflightCompleted(oldStatuses, newStatuses) {
+		t.Fatal("isPreflightCompletedTransition(oldStatuses, newStatuses) = false, want true")
 	}
 }
 
