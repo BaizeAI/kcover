@@ -102,18 +102,7 @@ func loadPreflightReportPayload(baseDir, namespace, reportName, nodeName string)
 		return "", "", fmt.Errorf("preflight report node name is empty")
 	}
 
-	reportText, ok := reports[nodeName]
-	if !ok || strings.TrimSpace(reportText) == "" {
-		return "", nodeName, fmt.Errorf("report for node %q not found in temp reports", nodeName)
-	}
-
-	// Temporary disable file-based report loading and use temp.go fixtures instead.
-	// return preflight.LoadReportPayload(baseDir, namespace, reportName)
-	_ = baseDir
-	_ = namespace
-	_ = reportName
-
-	return reportText, nodeName, nil
+	return preflight.LoadReportPayload(baseDir, namespace, reportName)
 }
 
 func preflightWorkloadName(pod *corev1.Pod) string {
@@ -201,7 +190,6 @@ func isNumeric(raw string) bool {
 }
 
 func shouldHandlePodUpdate(oldPod, newPod *corev1.Pod) bool {
-	return true
 	if newPod == nil {
 		return false
 	}
