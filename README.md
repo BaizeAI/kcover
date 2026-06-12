@@ -20,7 +20,7 @@ Install `kcover` using Helm:
 
 ```shell
 helm repo add baizeai https://baizeai.github.io/charts
-helm install kcover baizeai/kcover --namespace kcover-system --create-namespace
+helm install kcover baizeai/kcover --version 0.10.0 --namespace kcover-system --create-namespace
 ```
 
 ### Configuration
@@ -75,6 +75,7 @@ Install with MetaX enabled:
 
 ```shell
 helm install kcover baizeai/kcover \
+  --version 0.10.0 \
   --namespace kcover-system \
   --create-namespace \
   --set agent.config.data.vendor=2
@@ -84,6 +85,7 @@ Switch an existing release to MetaX:
 
 ```shell
 helm upgrade kcover baizeai/kcover \
+  --version 0.10.0 \
   --namespace kcover-system \
   --reuse-values \
   --set agent.config.data.vendor=2
@@ -93,6 +95,7 @@ If your MetaX nodes require HCA checks, set the HCA IDs as chart values too:
 
 ```shell
 helm upgrade kcover baizeai/kcover \
+  --version 0.10.0 \
   --namespace kcover-system \
   --reuse-values \
   --set agent.config.data.vendor=2 \
@@ -189,5 +192,5 @@ If you need to build manually, use:
 
 ```shell
 docker build -f docker/mx-smi.Dockerfile -t ghcr.io/baizeai/mx-smi:v0.2 .
-docker build -f docker/agent.Dockerfile --build-arg MX_SMI_IMAGE=ghcr.io/baizeai/mx-smi:v0.2 -t ghcr.io/baizeai/kcover-agent:<tag> .
+docker build -f docker/agent.Dockerfile --build-arg MX_SMI_IMAGE=ghcr.io/baizeai/mx-smi:v0.2 -t ghcr.io/baizeai/kcover-agent:v0.10.0 .
 ```

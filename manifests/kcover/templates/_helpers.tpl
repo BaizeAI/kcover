@@ -62,11 +62,11 @@ Create the name of the service account to use
 {{- end }}
 
 {{- define "controller.image" -}}
-{{ include "common.images.image" (dict "imageRoot" .Values.controller.image "global" .Values.global "defaultTag" .Chart.Version) }}
+{{ include "common.images.image" (dict "imageRoot" .Values.controller.image "global" .Values.global "defaultTag" .Chart.AppVersion) }}
 {{- end -}}
 
 {{- define "agent.image" -}}
-{{ include "common.images.image" (dict "imageRoot" .Values.agent.image "global" .Values.global "defaultTag" .Chart.Version) }}
+{{ include "common.images.image" (dict "imageRoot" .Values.agent.image "global" .Values.global "defaultTag" .Chart.AppVersion) }}
 {{- end -}}
 
 {{- define "kcover.agentConfigMapName" -}}
