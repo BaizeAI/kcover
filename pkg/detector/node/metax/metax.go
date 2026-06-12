@@ -115,29 +115,48 @@ func (d *detector) hasMetaXGPUCapacity(ctx context.Context) (bool, error) {
 }
 
 func (d *detector) check() error {
-	klog.InfoS("Running MetaX GPU availability check")
-	err := gpuCheck(d.config.GPUNum)
-	if err != nil {
+	klog.InfoS("MetaX day2 check started", "check", "gpu availability", "node", d.config.NodeName, "requiredGPUCount", d.config.GPUNum)
+	if err := gpuCheck(d.config.GPUNum); err != nil {
+		logDay2CheckResult("gpu availability", err, "node", d.config.NodeName, "requiredGPUCount", d.config.GPUNum)
 		return err
+	}
+	logDay2CheckResult("gpu availability", nil, "node", d.config.NodeName, "requiredGPUCount", d.config.GPUNum)
+
+	klog.InfoS("MetaX day2 check started", "check", "temperature", "node", d.config.NodeName, "maxTemperatureC", d.config.Temperature)
+	if err := temperatureCheck(d.config.Temperature); err != nil {
+		logDay2CheckResult("temperature", err, "node", d.config.NodeName, "maxTemperatureC", d.config.Temperature)
+		return err
+	}
+	logDay2CheckResult("temperature", nil, "node", d.config.NodeName, "maxTemperatureC", d.config.Temperature)
+
+	klog.InfoS("MetaX day2 check started", "check", "ntp sync", "node", d.config.NodeName, "maxOffsetMillis", d.config.NTPMaxOffsetMillis)
+	if err := ntpSyncCheck(d.config.NTPMaxOffsetMillis); err != nil {
+		logDay2CheckResult("ntp sync", err, "node", d.config.NodeName, "maxOffsetMillis", d.config.NTPMaxOffsetMillis)
+		return err
+	}
+	logDay2CheckResult("ntp sync", nil, "node", d.config.NodeName, "maxOffsetMillis", d.config.NTPMaxOffsetMillis)
+
+	klog.InfoS("MetaX day2 check started", "check", "ecc fault page", "node", d.config.NodeName, "maxECCCount", d.config.ECCMaxCount)
+	if err := eccFaultPageCheck(d.config.ECCMaxCount); err != nil {
+		logDay2CheckResult("ecc fault page", err, "node", d.config.NodeName, "maxECCCount", d.config.ECCMaxCount)
+		return err
+	}
+	logDay2CheckResult("ecc fault page", nil, "node", d.config.NodeName, "maxECCCount", d.config.ECCMaxCount)
+
+	klog.InfoS("MetaX day2 check started", "check", "hca state", "node", d.config.NodeName, "hcaIDs", d.config.HCAIDs)
+	err := hcaStateCheck(d.config.HCAIDs)
+	logDay2CheckResult("hca state", err, "node", d.config.NodeName, "hcaIDs", d.config.HCAIDs)
+	return err
+}
+
+func logDay2CheckResult(name string, err error, kvs ...any) {
+	fields := append([]any{"check", name}, kvs...)
+	if err != nil {
+		klog.InfoS("MetaX day2 check failed", append(fields, "error", err.Error())...)
+		return
 	}
 
-	klog.InfoS("Running MetaX temperature check")
-	err = temperatureCheck(d.config.Temperature)
-	if err != nil {
-		return err
-	}
-	klog.InfoS("Running MetaX NTP sync check")
-	err = ntpSyncCheck(d.config.NTPMaxOffsetMillis)
-	if err != nil {
-		return err
-	}
-	klog.InfoS("Running MetaX ECC fault page check")
-	err = eccFaultPageCheck(d.config.ECCMaxCount)
-	if err != nil {
-		return err
-	}
-	klog.InfoS("Running MetaX HCA state check")
-	return hcaStateCheck(d.config.HCAIDs)
+	klog.InfoS("MetaX day2 check succeeded", fields...)
 }
 
 func nextCheckTime(now time.Time, schedule string) (time.Time, error) {
