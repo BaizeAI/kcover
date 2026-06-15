@@ -11,6 +11,5 @@ RUN apt-get update \
 	&& rm -rf /var/lib/apt/lists/*
 
 COPY --from=metax-tools /opt/mxdriver/bin/mx-smi /usr/local/bin/mx-smi
-COPY --from=metax-tools /usr/bin/ibv_devinfo /usr/local/bin/ibv_devinfo
 
 RUN chmod +x /usr/local/bin/mx-smi /usr/local/bin/ibv_devinfo
