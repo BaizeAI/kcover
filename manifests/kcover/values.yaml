@@ -38,7 +38,6 @@ agent:
         gpuNum: 8 # 最少可用 GPU 数量阈值
         temperature: 85 # hotspot 温度上限，单位摄氏度，默认 85 度
         eccMaxCount: 64 # 每张卡允许的 Double Bit ECC 最大值
-        ntpMaxOffsetMillis: 10 # NTP 时间偏差上限，单位毫秒
 
   image:
     registry: ''
