@@ -48,9 +48,7 @@ RUN apt-get update \
 	&& dpkg -i /tmp/doca-host.deb \
 	&& apt-get update \
 	&& apt-get install -y --no-install-recommends \
-		doca-ofed \
-		ibverbs-providers \
-		libibverbs1 \
+		doca-ofed-userspace \
 	&& mkdir -p /tmp/maca-mxrdma \
 	&& tar -xJf /tmp/maca-mxrdma-3.7.2.0-deb-x86_64.tar.xz -C /tmp/maca-mxrdma \
 	&& dpkg -i --force-overwrite /tmp/maca-mxrdma/maca-mxrdma-3.7.2.0/mxrdma_*.deb \
@@ -60,8 +58,9 @@ RUN apt-get update \
 
 COPY --from=builder /app/kcover-agent kcover-agent
 COPY --from=metax-tools /usr/local/bin/mx-smi /usr/local/bin/mx-smi
-COPY --from=metax-tools /usr/local/bin/ibv_devinfo /usr/local/bin/ibv_devinfo
 COPY docker/agent-entrypoint.sh /usr/local/bin/agent-entrypoint.sh
+
+RUN ln -sf "$(command -v ibv_devinfo)" /usr/local/bin/ibv_devinfo
 
 RUN chmod +x /usr/local/bin/mx-smi /usr/local/bin/ibv_devinfo /usr/local/bin/agent-entrypoint.sh
 
