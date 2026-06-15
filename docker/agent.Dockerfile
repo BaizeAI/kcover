@@ -56,7 +56,7 @@ RUN apt-get update \
 	&& dpkg -i --force-overwrite /tmp/maca-mxrdma/maca-mxrdma-3.7.2.0/mxrdma_*.deb \
 	&& apt-get purge -y --auto-remove wget ca-certificates xz-utils \
 	&& rm -rf /var/lib/apt/lists/* \
-	&& rm -rf /tmp/maca-mxrdma /tmp/doca-host.deb
+	&& rm -rf /tmp/maca-mxrdma /tmp/doca-host.deb /tmp/maca-mxrdma-3.7.2.0-deb-x86_64.tar.xz
 
 COPY --from=builder /app/kcover-agent kcover-agent
 COPY --from=metax-tools /usr/local/bin/mx-smi /usr/local/bin/mx-smi
