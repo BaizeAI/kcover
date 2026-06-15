@@ -64,12 +64,13 @@ agent:
         gpuNum: 8
         temperature: 85
         eccMaxCount: 64
-        ntpMaxOffsetMillis: 10
 ```
 
 The default vendor is Nvidia (`vendor: 1`). To switch the agent to MetaX,
 set `agent.config.data.vendor` to `2`. MetaX-specific day2 checks and
 preflight report collection are enabled automatically for the MetaX vendor.
+The day2 clock check is currently disabled and is therefore not exposed in the
+chart values.
 
 Install with MetaX enabled:
 

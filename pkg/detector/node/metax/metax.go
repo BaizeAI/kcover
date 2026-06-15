@@ -129,12 +129,13 @@ func (d *detector) check() error {
 	}
 	logDay2CheckResult("temperature", nil, "node", d.config.NodeName, "maxTemperatureC", d.config.Temperature)
 
-	klog.InfoS("MetaX day2 check started", "check", "ntp sync", "node", d.config.NodeName, "maxOffsetMillis", d.config.NTPMaxOffsetMillis)
-	if err := ntpSyncCheck(d.config.NTPMaxOffsetMillis); err != nil {
-		logDay2CheckResult("ntp sync", err, "node", d.config.NodeName, "maxOffsetMillis", d.config.NTPMaxOffsetMillis)
-		return err
-	}
-	logDay2CheckResult("ntp sync", nil, "node", d.config.NodeName, "maxOffsetMillis", d.config.NTPMaxOffsetMillis)
+	// 因为是在容器中，所以不再执行 NTP 偏移检查。
+	//	klog.InfoS("MetaX day2 check started", "check", "ntp sync", "node", d.config.NodeName, "maxOffsetMillis", d.config.NTPMaxOffsetMillis)
+	//	if err := ntpSyncCheck(d.config.NTPMaxOffsetMillis); err != nil {
+	//		logDay2CheckResult("ntp sync", err, "node", d.config.NodeName, "maxOffsetMillis", d.config.NTPMaxOffsetMillis)
+	//		return err
+	//	}
+	//	logDay2CheckResult("ntp sync", nil, "node", d.config.NodeName, "maxOffsetMillis", d.config.NTPMaxOffsetMillis)
 
 	klog.InfoS("MetaX day2 check started", "check", "ecc fault page", "node", d.config.NodeName, "maxECCCount", d.config.ECCMaxCount)
 	if err := eccFaultPageCheck(d.config.ECCMaxCount); err != nil {
