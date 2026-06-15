@@ -44,7 +44,7 @@ agent:
     repository: baizeai/kcover-agent
     pullPolicy: IfNotPresent
     # Overrides the image tag whose default is the chart appVersion.
-    tag: "v0.10.0"
+    tag: ""
 
   imagePullSecrets: []
 
@@ -129,7 +129,7 @@ controller:
     repository: baizeai/kcover-controller
     pullPolicy: IfNotPresent
     # Overrides the image tag whose default is the chart appVersion.
-    tag: "v0.10.0"
+    tag: ""
 
   imagePullSecrets: []
 
