@@ -193,5 +193,5 @@ If you need to build manually, use:
 
 ```shell
 docker build -f docker/mx-smi.Dockerfile -t ghcr.io/baizeai/mx-smi:v0.2 .
-docker build -f docker/agent.Dockerfile --build-arg MX_SMI_IMAGE=ghcr.io/baizeai/mx-smi:v0.2 -t ghcr.io/baizeai/kcover-agent:v0.10.0 .
+docker build -f docker/agent.Dockerfile --build-arg MX_SMI_IMAGE=ghcr.io/baizeai/mx-smi:v0.2 -t ghcr.io/baizeai/kcover-agent:v0.11.0 .
 ```
