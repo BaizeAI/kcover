@@ -28,6 +28,7 @@ FROM m.daocloud.io/docker.io/ubuntu:24.04
 WORKDIR /app
 
 ENV DEBIAN_FRONTEND=noninteractive
+ARG TARGETARCH
 
 ARG DOCA_HOST_REPO_DEB=https://content.mellanox.com/DOCA/DOCA_v3.2.0/host/doca-host_3.2.0-125000-25.10-ubuntu2404_amd64.deb
 ARG DOCA_HOST_REPO_DEB_SHA256=5a72f90c39994893b3bcafd07ac3112b5a53076d484ea1051075e6ded70fd666
@@ -40,18 +41,20 @@ RUN apt-get update \
 		ca-certificates \
 		libnl-3-200 \
 		libnl-route-3-200 \
+		ibverbs-utils \
 		wget \
 		xz-utils \
 		tzdata \
-	&& wget -O /tmp/doca-host.deb "$DOCA_HOST_REPO_DEB" \
-	&& echo "$DOCA_HOST_REPO_DEB_SHA256  /tmp/doca-host.deb" | sha256sum -c - \
-	&& dpkg -i /tmp/doca-host.deb \
-	&& apt-get update \
-	&& apt-get install -y --no-install-recommends \
-		doca-ofed-userspace \
-	&& mkdir -p /tmp/maca-mxrdma \
-	&& tar -xJf /tmp/maca-mxrdma-3.7.2.0-deb-x86_64.tar.xz -C /tmp/maca-mxrdma \
-	&& dpkg -i --force-overwrite /tmp/maca-mxrdma/maca-mxrdma-3.7.2.0/mxrdma_*.deb \
+	&& if [ "$TARGETARCH" = "amd64" ]; then \
+		wget -O /tmp/doca-host.deb "$DOCA_HOST_REPO_DEB"; \
+		echo "$DOCA_HOST_REPO_DEB_SHA256  /tmp/doca-host.deb" | sha256sum -c -; \
+		dpkg -i /tmp/doca-host.deb; \
+		apt-get update; \
+		apt-get install -y --no-install-recommends doca-ofed-userspace; \
+		mkdir -p /tmp/maca-mxrdma; \
+		tar -xJf /tmp/maca-mxrdma-3.7.2.0-deb-x86_64.tar.xz -C /tmp/maca-mxrdma; \
+		dpkg -i --force-overwrite /tmp/maca-mxrdma/maca-mxrdma-3.7.2.0/mxrdma_*.deb; \
+	fi \
 	&& apt-get purge -y --auto-remove wget ca-certificates xz-utils \
 	&& rm -rf /var/lib/apt/lists/* \
 	&& rm -rf /tmp/maca-mxrdma /tmp/doca-host.deb /tmp/maca-mxrdma-3.7.2.0-deb-x86_64.tar.xz
@@ -59,6 +62,12 @@ RUN apt-get update \
 COPY --from=builder /app/kcover-agent kcover-agent
 COPY --from=metax-tools /usr/local/bin/mx-smi /usr/local/bin/mx-smi
 COPY docker/agent-entrypoint.sh /usr/local/bin/agent-entrypoint.sh
+
+RUN if [ "$TARGETARCH" != "amd64" ]; then \
+		echo '#!/usr/bin/env sh' > /usr/local/bin/mx-smi; \
+		echo 'echo "mx-smi is only available on amd64 builds" >&2' >> /usr/local/bin/mx-smi; \
+		echo 'exit 1' >> /usr/local/bin/mx-smi; \
+	fi
 
 RUN ln -sf "$(command -v ibv_devinfo)" /usr/local/bin/ibv_devinfo
 
