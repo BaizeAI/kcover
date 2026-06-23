@@ -714,6 +714,9 @@ func batchFailed(batchMap map[string]any, batchIdx int, busBWThresholdGBPS float
 		klog.Warningf("preflight batch skipped and treated as abnormal: batchIdx=%d pair=%v selfIP=%v reason=%v", batchIdx, batchMap["pair"], batchMap["self_ip"], batchMap["reason"])
 		return true, nil
 	}
+	if busBWThresholdGBPS == 0 {
+		return false, nil
+	}
 
 	allreduceMS, errMS := floatField(batchMap["allreduce_ms"])
 	allreduceShape, errShape := intField(batchMap["allreduce_shape"])
@@ -726,8 +729,8 @@ func batchFailed(batchMap map[string]any, batchIdx int, busBWThresholdGBPS float
 	if allreduceMS <= 0 || allreduceShape <= 0 || dtypeBytes <= 0 || batchWorldSize <= 1 {
 		return true, nil
 	}
-
 	bw := calculateBusBW(allreduceMS, allreduceShape, dtypeBytes, batchWorldSize)
+	klog.V(4).InfoS("calculated preflight batch bus bandwidth", "batchIdx", batchIdx, "allreduceMS", allreduceMS, "allreduceShape", allreduceShape, "dtypeBytes", dtypeBytes, "worldSize", batchWorldSize, "busBWGBPS", bw, "thresholdGBPS", busBWThresholdGBPS, "failed", bw < busBWThresholdGBPS)
 	return bw < busBWThresholdGBPS, nil
 }
 
@@ -777,7 +780,7 @@ func extractBusBWThreshold(payload map[string]any) (float64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("invalid %s: %w", busbwThreshold, err)
 	}
-	if value <= 0 {
+	if value < 0 {
 		return 0, fmt.Errorf("invalid %s: %v", busbwThreshold, value)
 	}
 

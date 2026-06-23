@@ -228,6 +228,30 @@ func TestExtractBusBWThresholdUsesDefaultForEmptyString(t *testing.T) {
 	}
 }
 
+func TestExtractBusBWThresholdAcceptsZeroToDisableGate(t *testing.T) {
+	t.Parallel()
+
+	got, err := extractBusBWThreshold(map[string]any{busbwThreshold: "0"})
+	if err != nil {
+		t.Fatalf("extractBusBWThreshold(...) error = %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("extractBusBWThreshold(...) = %v, want 0", got)
+	}
+}
+
+func TestBatchFailedSkipsBusBWCalculationWhenThresholdDisabled(t *testing.T) {
+	t.Parallel()
+
+	failed, err := batchFailed(map[string]any{"status": "ok"}, 0, 0)
+	if err != nil {
+		t.Fatalf("batchFailed(...) error = %v", err)
+	}
+	if failed {
+		t.Fatal("batchFailed(...) = true, want false")
+	}
+}
+
 func TestSlowNodeAggregatorDetectsSlowNodeFromBatchIntersection(t *testing.T) {
 	t.Parallel()
 
@@ -904,6 +928,7 @@ func TestExtractNodeReportAcceptsStringBatchIdx(t *testing.T) {
 	  "node_name": "node-a",
 	  "gpu_check": 1,
 	  "storage_check": 1,
+	  "node_check_busbw_threshold_gbps": "5",
 	  "batches": [
 	    {
 	      "batch_idx": "0",
@@ -964,6 +989,7 @@ func TestExtractNodeReportRejectsFractionalPerformanceIntegerFields(t *testing.T
 	  "node_name": "node-a",
 	  "gpu_check": 1,
 	  "storage_check": 1,
+	  "node_check_busbw_threshold_gbps": "5",
 	  "batches": [
 	    {
 	      "batch_idx": 0,
