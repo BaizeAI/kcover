@@ -45,16 +45,16 @@ RUN apt-get update \
 		wget \
 		xz-utils \
 		tzdata \
-	&& if [ "$TARGETARCH" = "amd64" ]; then \
-		wget -O /tmp/doca-host.deb "$DOCA_HOST_REPO_DEB"; \
-		echo "$DOCA_HOST_REPO_DEB_SHA256  /tmp/doca-host.deb" | sha256sum -c -; \
-		dpkg -i /tmp/doca-host.deb; \
-		apt-get update; \
-		apt-get install -y --no-install-recommends doca-ofed-userspace; \
-		mkdir -p /tmp/maca-mxrdma; \
-		tar -xJf /tmp/maca-mxrdma-3.7.2.0-deb-x86_64.tar.xz -C /tmp/maca-mxrdma; \
-		dpkg -i --force-overwrite /tmp/maca-mxrdma/maca-mxrdma-3.7.2.0/mxrdma_*.deb; \
-	fi \
+		&& if [ "$TARGETARCH" = "amd64" ]; then \
+			wget -O /tmp/doca-host.deb "$DOCA_HOST_REPO_DEB"; \
+			echo "$DOCA_HOST_REPO_DEB_SHA256  /tmp/doca-host.deb" | sha256sum -c -; \
+			dpkg -i /tmp/doca-host.deb; \
+			apt-get update; \
+			apt-get install -y --no-install-recommends doca-ofed-userspace; \
+			mkdir -p /tmp/maca-mxrdma; \
+			tar -xJf /tmp/maca-mxrdma-3.7.2.0-deb-x86_64.tar.xz -C /tmp/maca-mxrdma; \
+			dpkg -i --force-overwrite /tmp/maca-mxrdma/maca-mxrdma-3.7.2.0/mxrdma_*.deb; \
+		fi \
 	&& apt-get purge -y --auto-remove wget ca-certificates xz-utils \
 	&& rm -rf /var/lib/apt/lists/* \
 	&& rm -rf /tmp/maca-mxrdma /tmp/doca-host.deb /tmp/maca-mxrdma-3.7.2.0-deb-x86_64.tar.xz

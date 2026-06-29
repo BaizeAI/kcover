@@ -146,8 +146,11 @@ Once installed, `kcover` will automatically monitor the labeled resources for an
 Supported compacted report threshold field:
 
 ```yaml
-node_check_busbw_threshold_gbps: "5"
+node_check_busbw_threshold_gbps: "0"
 ```
+
+The default is `0`, which records bus bandwidth without marking a batch slow
+based on bandwidth. Set a positive value to enable threshold evaluation.
 
 Controller timeout example:
 
