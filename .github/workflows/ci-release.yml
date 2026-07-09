@@ -112,7 +112,7 @@ jobs:
           chart_smever=${chart_version#"v"}
           sed -i "s/0.1.0/${chart_smever}/g" $HELM_CHARTS_DIR/Chart.yaml
 
-      - uses: getsentry/action-github-app-token@v2
+      - uses: getsentry/action-github-app-token@v4.0.0
         id: get_app_token
         with:
             app_id: ${{ secrets.APP_ID }}
