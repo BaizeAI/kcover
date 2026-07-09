@@ -38,7 +38,7 @@ jobs:
 
       - name: Docker meta Controller
         id: controller_meta
-        uses: docker/metadata-action@v4
+        uses: docker/metadata-action@v6
         with:
           images: |
             ghcr.io/baizeai/kcover-controller
@@ -47,7 +47,7 @@ jobs:
 
       - name: Docker meta Agent
         id: agent_meta
-        uses: docker/metadata-action@v4
+        uses: docker/metadata-action@v6
         with:
           images: |
             ghcr.io/baizeai/kcover-agent
