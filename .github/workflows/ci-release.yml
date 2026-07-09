@@ -55,7 +55,7 @@ jobs:
             type=semver,pattern={{raw}}
 
       - name: Build Image Controller
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -68,7 +68,7 @@ jobs:
           file: docker/kcover.Dockerfile
 
       - name: Build Image Agent
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
