@@ -59,7 +59,7 @@ func run() error {
 
 	sink := events.NewKubeEventSink(client)
 
-	detector, err := node.NewDetector(hostName, node.Vendor(cfg.Vendor), cfg.Interval, cfg.MetaX, client, sink)
+	detector, err := node.NewDetector(hostName, cfg, client, sink)
 	if err != nil {
 		return fmt.Errorf("create node detector: %w", err)
 	}
@@ -69,7 +69,7 @@ func run() error {
 		return fmt.Errorf("start node detector: %w", err)
 	}
 
-	observer, err := newPreflightObserver(client, sink, hostName, node.Vendor(cfg.Vendor))
+	observer, err := newPreflightObserver(client, sink, hostName)
 	if err != nil {
 		return fmt.Errorf("create preflight pod observer: %w", err)
 	}

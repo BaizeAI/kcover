@@ -4,9 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/baizeai/kcover/cmd/agent/config"
 	"github.com/baizeai/kcover/pkg/constants"
-	"github.com/baizeai/kcover/pkg/detector/node"
 	"github.com/baizeai/kcover/pkg/events"
 	"github.com/baizeai/kcover/pkg/preflight"
 
@@ -21,35 +19,15 @@ func (agentStubSink) RecordEvent(events.Event) error {
 	return nil
 }
 
-func TestNewPreflightObserverDispatchesByVendor(t *testing.T) {
+func TestNewPreflightObserverReturnsObserver(t *testing.T) {
 	t.Parallel()
 
-	if config.DefaultVendor != int(node.Nvidia) {
-		t.Fatalf("config.DefaultVendor = %d, want Nvidia(%d)", config.DefaultVendor, node.Nvidia)
-	}
-
-	observer, err := newPreflightObserver(fake.NewSimpleClientset(), agentStubSink{}, "node-a", node.Nvidia)
+	observer, err := newPreflightObserver(fake.NewSimpleClientset(), agentStubSink{}, "node-a")
 	if err != nil {
-		t.Fatalf("newPreflightObserver(Nvidia) error = %v", err)
+		t.Fatalf("newPreflightObserver() error = %v", err)
 	}
 	if observer == nil {
-		t.Fatal("newPreflightObserver(Nvidia) = nil, want placeholder observer")
-	}
-	if err := observer.Start(); err != nil {
-		t.Fatalf("newPreflightObserver(Nvidia).Start() error = %v", err)
-	}
-	observer.Stop()
-
-	observer, err = newPreflightObserver(fake.NewSimpleClientset(), agentStubSink{}, "node-a", node.MetaX)
-	if err != nil {
-		t.Fatalf("newPreflightObserver(MetaX) error = %v", err)
-	}
-	if observer == nil {
-		t.Fatal("newPreflightObserver(MetaX) = nil, want observer")
-	}
-
-	if _, err = newPreflightObserver(fake.NewSimpleClientset(), agentStubSink{}, "node-a", node.Vendor(99)); err == nil {
-		t.Fatal("newPreflightObserver(unknown) error = nil, want non-nil")
+		t.Fatal("newPreflightObserver() = nil, want observer")
 	}
 }
 

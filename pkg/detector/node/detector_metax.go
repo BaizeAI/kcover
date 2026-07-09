@@ -1,4 +1,6 @@
-package metax
+//go:build metax
+
+package node
 
 import (
 	"bufio"
@@ -13,7 +15,7 @@ import (
 	"time"
 
 	"github.com/baizeai/kcover/cmd/agent/config"
-	d "github.com/baizeai/kcover/pkg/detector"
+	detectorpkg "github.com/baizeai/kcover/pkg/detector"
 	"github.com/baizeai/kcover/pkg/events"
 	"github.com/baizeai/kcover/pkg/kube"
 
@@ -31,9 +33,9 @@ const bufferSize = 1
 
 const metaXGPUResourceName corev1.ResourceName = "metax-tech.com/gpu"
 
-var _ d.Detector = (*detector)(nil)
+var _ detectorpkg.Detector = (*metaXDetector)(nil)
 
-type detector struct {
+type metaXDetector struct {
 	eventCh chan events.Event
 	cancel  context.CancelFunc
 	doneCh  chan struct{}
@@ -46,20 +48,26 @@ type detector struct {
 	checkFn         func() error
 }
 
-func NewDetector(cfg config.MetaX, interval int, client kubernetes.Interface) *detector {
-	d := &detector{
+func newDetector(nodeName string, cfg config.Agent, client kubernetes.Interface) (detectorpkg.Detector, error) {
+	if client == nil {
+		return nil, fmt.Errorf("kubernetes client cannot be nil for metax detector")
+	}
+
+	metaXCfg := cfg.Features.MetaX
+	metaXCfg.NodeName = nodeName
+	d := &metaXDetector{
 		eventCh:  make(chan events.Event, bufferSize),
-		interval: interval,
-		config:   cfg,
+		interval: cfg.Interval,
+		config:   metaXCfg,
 		client:   client,
 	}
 	d.capabilityCheck = d.hasMetaXGPUCapacity
 	d.checkFn = d.check
 
-	return d
+	return d, nil
 }
 
-func (d *detector) day2Check(ctx context.Context) {
+func (d *metaXDetector) day2Check(ctx context.Context) {
 	enabled, err := d.capabilityCheck(ctx)
 	if err != nil {
 		klog.ErrorS(err, "MetaX day2 capability check failed", "node", d.config.NodeName, "resource", metaXGPUResourceName)
@@ -90,7 +98,7 @@ func (d *detector) day2Check(ctx context.Context) {
 	}
 }
 
-func (d *detector) hasMetaXGPUCapacity(ctx context.Context) (bool, error) {
+func (d *metaXDetector) hasMetaXGPUCapacity(ctx context.Context) (bool, error) {
 	if d.client == nil {
 		return false, fmt.Errorf("kubernetes client is nil")
 	}
@@ -114,7 +122,7 @@ func (d *detector) hasMetaXGPUCapacity(ctx context.Context) (bool, error) {
 	return quantity.Sign() > 0, nil
 }
 
-func (d *detector) check() error {
+func (d *metaXDetector) check() error {
 	klog.InfoS("MetaX day2 check started", "check", "gpu availability", "node", d.config.NodeName, "requiredGPUCount", d.config.GPUNum)
 	if err := gpuCheck(d.config.GPUNum); err != nil {
 		logDay2CheckResult("gpu availability", err, "node", d.config.NodeName, "requiredGPUCount", d.config.GPUNum)
@@ -175,7 +183,7 @@ func nextCheckTime(now time.Time, schedule string) (time.Time, error) {
 	return next, nil
 }
 
-func (d *detector) Start() error {
+func (d *metaXDetector) Start() error {
 	next, err := nextCheckTime(time.Now(), d.config.Day2CheckTime)
 	if err != nil {
 		return err
@@ -215,7 +223,7 @@ func (d *detector) Start() error {
 	return nil
 }
 
-func (d *detector) Stop() {
+func (d *metaXDetector) Stop() {
 	if d.cancel != nil {
 		d.cancel()
 	}
@@ -224,11 +232,11 @@ func (d *detector) Stop() {
 	}
 }
 
-func (d *detector) EventChan() <-chan events.Event {
+func (d *metaXDetector) EventChan() <-chan events.Event {
 	return d.eventCh
 }
 
-func (d *detector) String() string {
+func (d *metaXDetector) String() string {
 	return "MetaX"
 }
 

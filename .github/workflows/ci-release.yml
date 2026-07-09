@@ -54,6 +54,15 @@ jobs:
           tags: |
             type=semver,pattern={{raw}}
 
+      - name: Docker meta Agent MetaX
+        id: agent_metax_meta
+        uses: docker/metadata-action@v4
+        with:
+          images: |
+            ghcr.io/baizeai/kcover-agent-metax
+          tags: |
+            type=semver,pattern={{raw}}
+
       - name: Build Image Controller
         uses: docker/build-push-action@v4
         with:
@@ -71,7 +80,7 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           context: .
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: true
           provenance: false
           tags: ${{ steps.agent_meta.outputs.tags }}
@@ -79,6 +88,19 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           file: docker/agent.Dockerfile
+
+      - name: Build Image Agent MetaX
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ${{ steps.agent_metax_meta.outputs.tags }}
+          labels: ${{ steps.agent_metax_meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          file: docker/agent-metax.Dockerfile
           build-args: |
             MX_SMI_IMAGE=ghcr.io/baizeai/mx-smi:v0.2
 

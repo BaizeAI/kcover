@@ -20,7 +20,7 @@ Install `kcover` using Helm:
 
 ```shell
 helm repo add baizeai https://baizeai.github.io/charts
-helm install kcover baizeai/kcover --version 0.10.0 --namespace kcover-system --create-namespace
+helm install kcover baizeai/kcover --version 0.11.0 --namespace kcover-system --create-namespace
 ```
 
 ### Configuration
@@ -45,8 +45,13 @@ from a ConfigMap. The Helm chart creates a default ConfigMap automatically, and
 you can also point the agent to an existing user-managed ConfigMap.
 
 The only runtime flag kept by the agent is `--config`, which points to the
-mounted configuration file. Business settings such as `interval`, `vendor`, and
-all `metaX` thresholds are now read from the config file only.
+mounted configuration file. Business settings such as `interval` are always
+read from the config file. MetaX-specific settings are parsed only by the
+`kcover-agent-metax` image.
+
+The chart always renders the same inline config structure under
+`agent.config.data`. The generic image ignores the optional `metaX` block,
+while the MetaX image consumes it.
 
 Default chart-managed config:
 
@@ -54,7 +59,67 @@ Default chart-managed config:
 agent:
   config:
     data:
-      vendor: 1
+      interval: 5
+```
+
+`kcover-agent` is the default generic image and should also be treated as the
+replacement for the old Nvidia-only path. It is published as a multi-arch
+image and keeps common code paths such as preflight report collection, while
+MetaX-specific checks fall back to no-op.
+
+`kcover-agent-metax` adds the MetaX-specific day2 tooling and checks. The day2
+clock check is currently disabled and is therefore not exposed in the chart
+values.
+
+Install or update the default generic release:
+
+```shell
+helm install kcover baizeai/kcover \
+  --version 0.11.0 \
+  --namespace kcover-system \
+  --create-namespace
+
+helm upgrade kcover baizeai/kcover \
+  --version 0.11.0 \
+  --namespace kcover-system \
+  --reuse-values
+```
+
+Install or update the MetaX release:
+
+```shell
+helm install kcover baizeai/kcover \
+  --version 0.11.0 \
+  --namespace kcover-system \
+  --create-namespace \
+  --set agent.image.repository=baizeai/kcover-agent-metax
+
+helm upgrade kcover baizeai/kcover \
+  --version 0.11.0 \
+  --namespace kcover-system \
+  --reuse-values \
+  --set agent.image.repository=baizeai/kcover-agent-metax
+```
+
+If your MetaX nodes require HCA checks, set the HCA IDs as chart values too:
+
+```shell
+helm upgrade kcover baizeai/kcover \
+  --version 0.11.0 \
+  --namespace kcover-system \
+  --reuse-values \
+  --set agent.image.repository=baizeai/kcover-agent-metax \
+  --set-json 'agent.config.data.metaX.hcaIDs=["mlx5_0","mlx5_1"]'
+```
+
+Example MetaX-specific config:
+
+```yaml
+agent:
+  image:
+    repository: baizeai/kcover-agent-metax
+  config:
+    data:
       interval: 5
       metaX:
         hcaIDs:
@@ -64,43 +129,6 @@ agent:
         gpuNum: 8
         temperature: 85
         eccMaxCount: 64
-```
-
-The default vendor is Nvidia (`vendor: 1`). To switch the agent to MetaX,
-set `agent.config.data.vendor` to `2`. MetaX-specific day2 checks and
-preflight report collection are enabled automatically for the MetaX vendor.
-The day2 clock check is currently disabled and is therefore not exposed in the
-chart values.
-
-Install with MetaX enabled:
-
-```shell
-helm install kcover baizeai/kcover \
-  --version 0.10.0 \
-  --namespace kcover-system \
-  --create-namespace \
-  --set agent.config.data.vendor=2
-```
-
-Switch an existing release to MetaX:
-
-```shell
-helm upgrade kcover baizeai/kcover \
-  --version 0.10.0 \
-  --namespace kcover-system \
-  --reuse-values \
-  --set agent.config.data.vendor=2
-```
-
-If your MetaX nodes require HCA checks, set the HCA IDs as chart values too:
-
-```shell
-helm upgrade kcover baizeai/kcover \
-  --version 0.10.0 \
-  --namespace kcover-system \
-  --reuse-values \
-  --set agent.config.data.vendor=2 \
-  --set-json 'agent.config.data.metaX.hcaIDs=["mlx5_0","mlx5_1"]'
 ```
 
 If `metaX.hcaIDs` is set, the agent runs `ibv_devinfo` and requires every
@@ -173,12 +201,15 @@ controller:
 ## Image Build Notes
 
 The MetaX utility `mx-smi` is extracted into a dedicated image so that the
-agent image no longer needs to reference the full `maca-pytorch` runtime
+MetaX agent image no longer needs to reference the full `maca-pytorch` runtime
 directly.
 
 - Extracted image: `ghcr.io/baizeai/mx-smi:v0.2`
-- Agent base runtime: `ubuntu:24.04`
-- Agent build arg: `MX_SMI_IMAGE=ghcr.io/baizeai/mx-smi:v0.2`
+- Generic agent image: `ghcr.io/baizeai/kcover-agent`
+- MetaX agent image: `ghcr.io/baizeai/kcover-agent-metax`
+- Generic agent platforms: `linux/amd64,linux/arm64`
+- MetaX agent platforms: `linux/amd64`
+- MetaX build arg: `MX_SMI_IMAGE=ghcr.io/baizeai/mx-smi:v0.2`
 
 Build and push the extracted `mx-smi` image:
 
@@ -186,15 +217,22 @@ Build and push the extracted `mx-smi` image:
 make image-mx-smi
 ```
 
-Build and push the agent image with the extracted `mx-smi` image injected:
+Build and push the default generic agent image:
 
 ```shell
 make image-agent
+```
+
+Build and push the MetaX agent image:
+
+```shell
+make image-agent-metax
 ```
 
 If you need to build manually, use:
 
 ```shell
 docker build -f docker/mx-smi.Dockerfile -t ghcr.io/baizeai/mx-smi:v0.2 .
-docker build -f docker/agent.Dockerfile --build-arg MX_SMI_IMAGE=ghcr.io/baizeai/mx-smi:v0.2 -t ghcr.io/baizeai/kcover-agent:v0.11.0 .
+docker buildx build -f docker/agent.Dockerfile --platform linux/amd64,linux/arm64 -t ghcr.io/baizeai/kcover-agent:v0.11.0 .
+docker build -f docker/agent-metax.Dockerfile --build-arg MX_SMI_IMAGE=ghcr.io/baizeai/mx-smi:v0.2 -t ghcr.io/baizeai/kcover-agent-metax:v0.11.0 .
 ```
