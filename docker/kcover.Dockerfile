@@ -19,7 +19,7 @@ ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -ldflags "-s -w" -o kcover-controller ./cmd/kcover
 
 # runner
-FROM m.daocloud.io/docker.io/ubuntu:22.04
+FROM m.daocloud.io/docker.io/ubuntu:26.04
 
 WORKDIR /app
 

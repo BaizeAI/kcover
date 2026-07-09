@@ -1,6 +1,6 @@
 FROM cr.metax-tech.com/public-library/maca-pytorch:3.3.0.4-torch2.6-py310-ubuntu24.04-amd64 AS metax-tools
 
-FROM m.daocloud.io/docker.io/ubuntu:24.04
+FROM m.daocloud.io/docker.io/ubuntu:26.04
 
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends \

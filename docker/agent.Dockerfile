@@ -23,7 +23,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -ldflags "-s -w" -o kco
 FROM ${MX_SMI_IMAGE} AS metax-tools
 
 # runner
-FROM m.daocloud.io/docker.io/ubuntu:24.04
+FROM m.daocloud.io/docker.io/ubuntu:26.04
 
 WORKDIR /app
 
