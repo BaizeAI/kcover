@@ -13,14 +13,14 @@ const (
 )
 
 type Agent struct {
-	Interval int           `yaml:"interval"`
-	Features FeatureConfig `yaml:",inline"`
+	Interval int          `yaml:"interval"`
+	Flavor   FlavorConfig `yaml:",inline"`
 }
 
 func DefaultAgent() Agent {
 	return Agent{
 		Interval: DefaultInterval,
-		Features: defaultFeatureConfig(),
+		Flavor:   defaultFlavorConfig(),
 	}
 }
 
@@ -46,7 +46,7 @@ func Load(path string) (Agent, error) {
 }
 
 func (cfg Agent) String() string {
-	summary := cfg.Features.String()
+	summary := cfg.Flavor.String()
 	if summary == "" {
 		return fmt.Sprintf("intervalSeconds=%d", cfg.Interval)
 	}
@@ -58,5 +58,5 @@ func (cfg *Agent) ApplyDefaults() {
 	if cfg.Interval <= 0 {
 		cfg.Interval = DefaultInterval
 	}
-	cfg.Features.ApplyDefaults()
+	cfg.Flavor.ApplyDefaults()
 }

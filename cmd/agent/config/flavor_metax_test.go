@@ -15,7 +15,7 @@ func TestLoadParsesMetaXConfigForMetaxBuild(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	metaX := cfg.Features.MetaX
+	metaX := cfg.Flavor.MetaX
 	if metaX.GPUNum != 16 {
 		t.Fatalf("metaX.GPUNum = %d, want 16", metaX.GPUNum)
 	}
@@ -35,7 +35,7 @@ func TestLoadParsesMetaXHCAIDs(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	metaX := cfg.Features.MetaX
+	metaX := cfg.Flavor.MetaX
 	want := []string{"mlx5_0", "mlx5_4"}
 	if !reflect.DeepEqual(metaX.HCAIDs, want) {
 		t.Fatalf("metaX.HCAIDs = %v, want %v", metaX.HCAIDs, want)
@@ -50,7 +50,7 @@ func TestLoadReturnsMetaXDefaultsWhenPathIsEmpty(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	metaX := cfg.Features.MetaX
+	metaX := cfg.Flavor.MetaX
 	if metaX.GPUNum != DefaultMetaXGPUNum {
 		t.Fatalf("metaX.GPUNum = %d, want %d", metaX.GPUNum, DefaultMetaXGPUNum)
 	}
@@ -60,7 +60,7 @@ func TestApplyDefaultsRepairsInvalidMetaXValues(t *testing.T) {
 	t.Parallel()
 
 	cfg := Agent{
-		Features: FeatureConfig{
+		Flavor: FlavorConfig{
 			MetaX: MetaX{
 				GPUNum:             -1,
 				Temperature:        0,
@@ -73,7 +73,7 @@ func TestApplyDefaultsRepairsInvalidMetaXValues(t *testing.T) {
 
 	cfg.ApplyDefaults()
 
-	metaX := cfg.Features.MetaX
+	metaX := cfg.Flavor.MetaX
 	if metaX.GPUNum != DefaultMetaXGPUNum {
 		t.Fatalf("metaX.GPUNum = %d, want %d", metaX.GPUNum, DefaultMetaXGPUNum)
 	}

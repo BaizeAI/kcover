@@ -25,17 +25,17 @@ type MetaX struct {
 	Day2CheckTime      string   `yaml:"day2CheckTime"`
 }
 
-type FeatureConfig struct {
+type FlavorConfig struct {
 	MetaX MetaX `yaml:"metaX"`
 }
 
-func defaultFeatureConfig() FeatureConfig {
-	return FeatureConfig{
+func defaultFlavorConfig() FlavorConfig {
+	return FlavorConfig{
 		MetaX: defaultMetaXConfig(),
 	}
 }
 
-func (cfg *FeatureConfig) ApplyDefaults() {
+func (cfg *FlavorConfig) ApplyDefaults() {
 	if !validMetaXDay2CheckTime(cfg.MetaX.Day2CheckTime) {
 		cfg.MetaX.Day2CheckTime = DefaultMetaXDay2CheckTime
 	}
@@ -53,7 +53,7 @@ func (cfg *FeatureConfig) ApplyDefaults() {
 	}
 }
 
-func (cfg FeatureConfig) String() string {
+func (cfg FlavorConfig) String() string {
 	return fmt.Sprintf(
 		"metaX.day2CheckTime=%s metaX.gpuNum=%d metaX.temperature=%d metaX.eccMaxCount=%d metaX.ntpMaxOffsetMillis=%d metaX.hcaIDs=%v",
 		cfg.MetaX.Day2CheckTime,

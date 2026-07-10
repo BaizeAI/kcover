@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/baizeai/kcover/cmd/agent/config"
+	d "github.com/baizeai/kcover/pkg/detector"
 	detectorpkg "github.com/baizeai/kcover/pkg/detector"
 	"github.com/baizeai/kcover/pkg/events"
 	"github.com/baizeai/kcover/pkg/kube"
@@ -33,7 +34,7 @@ const bufferSize = 1
 
 const metaXGPUResourceName corev1.ResourceName = "metax-tech.com/gpu"
 
-var _ detectorpkg.Detector = (*metaXDetector)(nil)
+var _ d.Detector = (*metaXDetector)(nil)
 
 type metaXDetector struct {
 	eventCh chan events.Event
@@ -53,7 +54,7 @@ func newDetector(nodeName string, cfg config.Agent, client kubernetes.Interface)
 		return nil, fmt.Errorf("kubernetes client cannot be nil for metax detector")
 	}
 
-	metaXCfg := cfg.Features.MetaX
+	metaXCfg := cfg.Flavor.MetaX
 	metaXCfg.NodeName = nodeName
 	d := &metaXDetector{
 		eventCh:  make(chan events.Event, bufferSize),
