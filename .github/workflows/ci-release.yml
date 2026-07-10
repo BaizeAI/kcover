@@ -126,13 +126,12 @@ jobs:
           VERSION=${GITHUB_REF#refs/tags/}
           echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
 
-      - name: Tag helm chart image
+      - name: Sync Helm chart version
         run: |
           image_tag=${{ steps.get_version.outputs.VERSION }}
-          chart_version=${{ steps.get_version.outputs.VERSION }}
-          sed -i "s/latest/${image_tag}/g" $HELM_CHARTS_DIR/values.yaml
-          chart_smever=${chart_version#"v"}
-          sed -i "s/0.1.0/${chart_smever}/g" $HELM_CHARTS_DIR/Chart.yaml
+          chart_semver=${image_tag#"v"}
+          sed -i -E "s/^version: .*/version: \"${chart_semver}\"/" "$HELM_CHARTS_DIR/Chart.yaml"
+          sed -i -E "s/^appVersion: .*/appVersion: \"${image_tag}\"/" "$HELM_CHARTS_DIR/Chart.yaml"
 
       - uses: getsentry/action-github-app-token@v4.0.0
         id: get_app_token
