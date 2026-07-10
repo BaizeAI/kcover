@@ -26,7 +26,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
+        uses: docker/setup-qemu-action@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
       - name: Login Github Container registry
@@ -134,7 +134,7 @@ jobs:
           chart_smever=${chart_version#"v"}
           sed -i "s/0.1.0/${chart_smever}/g" $HELM_CHARTS_DIR/Chart.yaml
 
-      - uses: getsentry/action-github-app-token@v2
+      - uses: getsentry/action-github-app-token@v4.0.0
         id: get_app_token
         with:
             app_id: ${{ secrets.APP_ID }}
