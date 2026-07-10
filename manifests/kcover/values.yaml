@@ -20,6 +20,11 @@ global:
   imageRegistry: ghcr.io
 
 agent:
+  # Agent deployment flavor. Supported values: base, metax.
+  # base uses the generic multi-arch agent image; metax uses the MetaX-specific agent image
+  # and enables MetaX-only host mounts.
+  flavor: base
+
   # Additional CLI args for kcover-agent process (for example: ["-v=2"]).
   # --config is always injected by the chart and does not need to be repeated here.
   # Default to info-only logs; set -v=2/-v=4 for debug details.
@@ -42,7 +47,8 @@ agent:
 
   image:
     registry: ''
-    repository: baizeai/kcover-agent
+    # Leave empty to select the default repository from agent.flavor.
+    repository: ''
     pullPolicy: IfNotPresent
     # Overrides the image tag whose default is the chart appVersion.
     tag: ""
@@ -81,37 +87,43 @@ agent:
     targetCPUUtilizationPercentage: 80
     # targetMemoryUtilizationPercentage: 80
 
-  # Additional volumes on the output Deployment definition.
+  # Additional volumes on the output agent DaemonSet definition.
   volumes:
-    - name: infiniband
-      hostPath:
-        path: /dev/infiniband
-        type: DirectoryOrCreate
     - name: preflight-report
       hostPath:
         path: /var/lib/kcover/preflight
         type: DirectoryOrCreate
-    - name: host-localtime
-      hostPath:
-        path: /etc/localtime
-        type: File
   # - name: foo
   #   secret:
   #     secretName: mysecret
   #     optional: false
 
-  # Additional volumeMounts on the output Deployment definition.
+  # Additional volumeMounts on the output agent DaemonSet definition.
   volumeMounts:
-    - name: infiniband
-      mountPath: /dev/infiniband
     - name: preflight-report
       mountPath: /var/lib/kcover/preflight
-    - name: host-localtime
-      mountPath: /etc/localtime
-      readOnly: true
   # - name: foo
   #   mountPath: "/etc/foo"
   #   readOnly: true
+
+  flavors:
+    metax:
+      # Additional host resources used only by the MetaX image.
+      volumes:
+        - name: infiniband
+          hostPath:
+            path: /dev/infiniband
+            type: DirectoryOrCreate
+        - name: host-localtime
+          hostPath:
+            path: /etc/localtime
+            type: File
+      volumeMounts:
+        - name: infiniband
+          mountPath: /dev/infiniband
+        - name: host-localtime
+          mountPath: /etc/localtime
+          readOnly: true
 
   nodeSelector: {}
   tolerations: []

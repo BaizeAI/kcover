@@ -1,7 +1,10 @@
 # builder
-FROM --platform=$BUILDPLATFORM m.daocloud.io/docker.io/golang:1.23.2 AS builder
+ARG GO_BUILDER_IMAGE=m.daocloud.io/docker.io/library/golang:1.25.5-alpine
+FROM --platform=$BUILDPLATFORM ${GO_BUILDER_IMAGE} AS builder
 
 WORKDIR /app
+
+ENV GOTOOLCHAIN=auto
 
 COPY go.mod /app/go.mod
 COPY go.sum /app/go.sum

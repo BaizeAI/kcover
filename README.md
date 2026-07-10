@@ -14,6 +14,10 @@ Welcome to `kcover`, a Kubernetes solution designed to enhance the reliability a
 
 Ensure you have Kubernetes and Helm installed on your cluster. `kcover` is compatible with Kubernetes versions 1.19 and above.
 
+For local builds and tests, the repository now uses `go 1.25` with
+`toolchain go1.26.5`. The toolchain bump is part of the current CVE
+remediation for the agent dependency stack.
+
 ### Installation
 
 Install `kcover` using Helm:
@@ -52,6 +56,12 @@ read from the config file. MetaX-specific settings are parsed only by the
 The chart always renders the same inline config structure under
 `agent.config.data`. The generic image ignores the optional `metaX` block,
 while the MetaX image consumes it.
+
+The chart uses `agent.flavor` to choose the agent image flavor. The default is
+`base`, which selects the generic image. Setting `agent.flavor=metax` selects
+the MetaX image and enables MetaX-only host integrations such as
+`/dev/infiniband` and `/etc/localtime`. `agent.image.repository` remains
+available as an advanced override when you need a custom image repository.
 
 Default chart-managed config:
 
@@ -92,13 +102,13 @@ helm install kcover baizeai/kcover \
   --version 0.11.0 \
   --namespace kcover-system \
   --create-namespace \
-  --set agent.image.repository=baizeai/kcover-agent-metax
+  --set agent.flavor=metax
 
 helm upgrade kcover baizeai/kcover \
   --version 0.11.0 \
   --namespace kcover-system \
   --reuse-values \
-  --set agent.image.repository=baizeai/kcover-agent-metax
+  --set agent.flavor=metax
 ```
 
 If your MetaX nodes require HCA checks, set the HCA IDs as chart values too:
@@ -108,7 +118,7 @@ helm upgrade kcover baizeai/kcover \
   --version 0.11.0 \
   --namespace kcover-system \
   --reuse-values \
-  --set agent.image.repository=baizeai/kcover-agent-metax \
+  --set agent.flavor=metax \
   --set-json 'agent.config.data.metaX.hcaIDs=["mlx5_0","mlx5_1"]'
 ```
 
@@ -116,8 +126,7 @@ Example MetaX-specific config:
 
 ```yaml
 agent:
-  image:
-    repository: baizeai/kcover-agent-metax
+  flavor: metax
   config:
     data:
       interval: 5

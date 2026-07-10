@@ -65,8 +65,25 @@ Create the name of the service account to use
 {{ include "common.images.image" (dict "imageRoot" .Values.controller.image "global" .Values.global "defaultTag" .Chart.AppVersion) }}
 {{- end -}}
 
+{{- define "kcover.agentFlavor" -}}
+{{- $flavor := default "base" .Values.agent.flavor -}}
+{{- if not (or (eq $flavor "base") (eq $flavor "metax")) -}}
+{{- fail (printf "unsupported agent.flavor %q: supported values are base and metax" $flavor) -}}
+{{- end -}}
+{{- $flavor -}}
+{{- end -}}
+
 {{- define "agent.image" -}}
-{{ include "common.images.image" (dict "imageRoot" .Values.agent.image "global" .Values.global "defaultTag" .Chart.AppVersion) }}
+{{- $flavor := include "kcover.agentFlavor" . -}}
+{{- $repository := .Values.agent.image.repository -}}
+{{- if not $repository -}}
+  {{- if eq $flavor "metax" -}}
+    {{- $repository = "baizeai/kcover-agent-metax" -}}
+  {{- else -}}
+    {{- $repository = "baizeai/kcover-agent" -}}
+  {{- end -}}
+{{- end -}}
+{{ include "common.images.image" (dict "imageRoot" (dict "registry" .Values.agent.image.registry "repository" $repository "tag" .Values.agent.image.tag) "global" .Values.global "defaultTag" .Chart.AppVersion) }}
 {{- end -}}
 
 {{- define "kcover.agentConfigMapName" -}}

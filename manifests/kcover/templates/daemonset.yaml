@@ -53,10 +53,20 @@ spec:
           {{- with .Values.agent.volumeMounts }}
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- if eq (include "kcover.agentFlavor" .) "metax" }}
+          {{- with .Values.agent.flavors.metax.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- end }}
       volumes:
         - name: agent-config
           configMap:
             name: {{ include "kcover.agentConfigMapName" . }}
         {{- with .Values.agent.volumes }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
+        {{- if eq (include "kcover.agentFlavor" .) "metax" }}
+        {{- with .Values.agent.flavors.metax.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- end }}
