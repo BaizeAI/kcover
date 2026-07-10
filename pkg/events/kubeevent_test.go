@@ -262,7 +262,7 @@ func TestHandleK8sEventAddForwardsDay2EventDirectlyWhenEventChannelHasCapacity(t
 		Reason:         Day2EventReason,
 		Message:        "insufficient available GPUs: expected 9, found 8",
 		InvolvedObject: corev1.ObjectReference{APIVersion: "v1", Kind: "Node", Name: "node-a"},
-	})
+	}, false)
 
 	select {
 	case event := <-bridge.EventChan():
@@ -271,6 +271,57 @@ func TestHandleK8sEventAddForwardsDay2EventDirectlyWhenEventChannelHasCapacity(t
 		}
 	case <-time.After(time.Second):
 		t.Fatal("handleK8sEventAdd(day2) forwarded no event, want one")
+	}
+}
+
+func TestHandleK8sEventAddSkipsInitialListEvent(t *testing.T) {
+	t.Parallel()
+
+	bridge := NewKubeEventBridge(fake.NewSimpleClientset()).(*kubeEventBridge)
+	bridge.handleK8sEventAdd(context.Background(), &corev1.Event{
+		ObjectMeta: metav1.ObjectMeta{
+			CreationTimestamp: metav1.Now(),
+			Namespace:         "default",
+			Annotations: map[string]string{
+				constants.NeedRecoveryAnnotation: constants.True,
+			},
+		},
+		Message:        "old pod failure",
+		InvolvedObject: corev1.ObjectReference{APIVersion: "v1", Kind: "Pod", Namespace: "default", Name: "pod-a"},
+	}, true)
+
+	select {
+	case event := <-bridge.EventChan():
+		t.Fatalf("initial List event was forwarded: %+v", event)
+	default:
+	}
+}
+
+func TestHandleK8sEventAddKeepsInitialPreflightReport(t *testing.T) {
+	t.Parallel()
+
+	payload := `{"workload_size":2,"rank":0,"node_name":"node-a","gpu_check":1,"storage_check":1}`
+	bridge := NewKubeEventBridge(fake.NewSimpleClientset()).(*kubeEventBridge)
+	bridge.handleK8sEventAdd(context.Background(), &corev1.Event{
+		ObjectMeta: metav1.ObjectMeta{
+			CreationTimestamp: metav1.Now(),
+			Namespace:         "default",
+			Annotations: map[string]string{
+				constants.PreflightWorkloadAnnotation:  "job-a",
+				constants.PreflightNamespaceAnnotation: "train-ns",
+				constants.PreflightPayloadAnnotation:   payload,
+			},
+		},
+		InvolvedObject: corev1.ObjectReference{APIVersion: "v1", Kind: "Node", Name: "node-a"},
+	}, true)
+
+	select {
+	case event := <-bridge.EventChan():
+		if event.Message != payload || !IsPreflightEvent(event.Annotations) {
+			t.Fatalf("initial preflight event = %+v, want preserved report", event)
+		}
+	default:
+		t.Fatal("initial preflight report was dropped")
 	}
 }
 
@@ -297,7 +348,7 @@ func TestHandleK8sEventAddQueuesDay2EventWhenEventChannelIsFull(t *testing.T) {
 			Reason:         Day2EventReason,
 			Message:        "insufficient available GPUs: expected 9, found 8",
 			InvolvedObject: corev1.ObjectReference{APIVersion: "v1", Kind: "Node", Name: "node-a"},
-		})
+		}, false)
 	}()
 
 	select {
@@ -350,7 +401,7 @@ func TestHandleK8sEventAddQueuesPreflightEventWhenEventChannelIsFull(t *testing.
 			},
 			Message:        "preflight report available",
 			InvolvedObject: corev1.ObjectReference{APIVersion: "v1", Kind: "Node", Name: "node-a"},
-		})
+		}, false)
 	}()
 
 	select {
@@ -432,7 +483,7 @@ func TestHandleK8sEventAddQueuesPodEventWhenEventChannelIsFull(t *testing.T) {
 		},
 		Message:        "pod failed",
 		InvolvedObject: corev1.ObjectReference{APIVersion: "v1", Kind: "Pod", Namespace: "default", Name: "pod-a"},
-	})
+	}, false)
 
 	select {
 	case event := <-bridge.eventCh:

@@ -11,7 +11,6 @@ import (
 	"github.com/baizeai/kcover/pkg/kube"
 	"github.com/baizeai/kcover/pkg/preflight"
 
-	"github.com/jellydator/ttlcache/v3"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -27,7 +26,7 @@ type RecoveryController struct {
 	preflight              *preflightTracker
 	preflightSweepInterval time.Duration
 	restartDuration        time.Duration
-	restarts               *ttlcache.Cache[string, time.Time]
+	restartLedger          *recoveryLedger
 }
 
 const DefaultPreflightSweepInterval = time.Minute
@@ -44,7 +43,7 @@ func NewController(cli kubernetes.Interface, stream events.Stream, preflightRepo
 		preflight:              newPreflightTracker(preflightReportCollectionTimeout),
 		preflightSweepInterval: preflightSweepInterval,
 		restartDuration:        time.Second * 30,
-		restarts:               ttlcache.New[string, time.Time](),
+		restartLedger:          newRecoveryLedger(cli, kube.CurrentNamespace()),
 	}
 }
 
@@ -88,7 +87,12 @@ func (r *RecoveryController) onPodError(ctx context.Context, namespace, name str
 		klog.V(2).InfoS("skip recovery for pod", "namespace", namespace, "pod", name, "reason", "restartPolicy is Never")
 		return
 	}
-	if !r.allowJobRestart(namespace, jobLabel) {
+	restartAllowed, err := r.allowJobRestart(ctx, namespace, jobLabel)
+	if err != nil {
+		klog.ErrorS(err, "failed to determine whether job restart is allowed", "namespace", namespace, "job", jobLabel)
+		return
+	}
+	if !restartAllowed {
 		return
 	}
 
@@ -109,22 +113,16 @@ func (r *RecoveryController) isRecoveryEnabledForPod(ctx context.Context, pod *c
 	return labels[constants.EnabledRecoveryLabel] == constants.True, nil
 }
 
-func (r *RecoveryController) allowJobRestart(namespace, jobLabel string) bool {
-	key := fmt.Sprintf("%s/%s", namespace, jobLabel)
-	restartedAt := r.restarts.Get(key)
-	if restartedAt != nil {
-		klog.V(2).InfoS("skip restart for job", "namespace", namespace, "job", jobLabel, "lastRestartedAt", restartedAt.Value(), "retryWindow", r.restartDuration)
-		return false
+func (r *RecoveryController) allowJobRestart(ctx context.Context, namespace, jobLabel string) (bool, error) {
+	restartAllowed, lastRestartAt, err := r.restartLedger.allowRestart(ctx, namespace, jobLabel, r.restartDuration)
+	if err != nil {
+		return false, err
+	}
+	if !restartAllowed {
+		klog.V(2).InfoS("skip restart for job", "namespace", namespace, "job", jobLabel, "lastRestartAt", lastRestartAt, "retryWindow", r.restartDuration)
 	}
 
-	now := time.Now()
-	r.restarts.Set(key, now, r.restartDuration) // only restart once within restartDuration
-	go func() {
-		<-time.After(r.restartDuration - time.Second)
-		r.restarts.Delete(key)
-	}()
-
-	return true
+	return restartAllowed, nil
 }
 
 func (r *RecoveryController) restartJob(ctx context.Context, namespace, name string) {

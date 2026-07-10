@@ -82,14 +82,8 @@ func (o *observer) Start() error {
 	}
 	informer := factory.Core().V1().Pods().Informer()
 
-	_, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj any) {
-			pod, ok := obj.(*corev1.Pod)
-			if !ok {
-				return
-			}
-			o.onAdd(pod)
-		},
+	_, err := informer.AddEventHandler(cache.ResourceEventHandlerDetailedFuncs{
+		AddFunc: o.handleAdd,
 		UpdateFunc: func(oldObj, newObj any) {
 			oldPod, ok := oldObj.(*corev1.Pod)
 			if !ok {
@@ -121,6 +115,18 @@ func (o *observer) Start() error {
 
 	klog.InfoS("pod observer started", "observer", o.logName, "node", o.nodeName)
 	return nil
+}
+
+func (o *observer) handleAdd(obj any, isInInitialList bool) {
+	if isInInitialList {
+		return
+	}
+
+	pod, ok := obj.(*corev1.Pod)
+	if !ok {
+		return
+	}
+	o.onAdd(pod)
 }
 
 func (o *observer) Stop() {

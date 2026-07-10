@@ -59,8 +59,8 @@ func (bridge *kubeEventBridge) Start() error {
 
 	_, err := informer.AddEventHandler(cache.FilteringResourceEventHandler{
 		FilterFunc: bridge.shouldWatchEvent,
-		Handler: cache.ResourceEventHandlerFuncs{
-			AddFunc:    func(obj any) { bridge.handleK8sEventAdd(ctx, obj) },
+		Handler: cache.ResourceEventHandlerDetailedFuncs{
+			AddFunc:    func(obj any, isInInitialList bool) { bridge.handleK8sEventAdd(ctx, obj, isInInitialList) },
 			UpdateFunc: func(oldObj, newObj any) { bridge.handleK8sEventUpdate(ctx, oldObj, newObj) },
 		},
 	})
@@ -99,9 +99,13 @@ func (bridge *kubeEventBridge) shouldWatchEvent(obj any) bool {
 	return isPodObjectRef(event.InvolvedObject)
 }
 
-func (bridge *kubeEventBridge) handleK8sEventAdd(ctx context.Context, obj any) {
+func (bridge *kubeEventBridge) handleK8sEventAdd(ctx context.Context, obj any, isInInitialList bool) {
 	event, ok := obj.(*corev1.Event)
 	if !ok {
+		return
+	}
+	// Preflight Events still carry report data; only recovery Events are unsafe to replay.
+	if isInInitialList && !IsPreflightEvent(event.Annotations) {
 		return
 	}
 
