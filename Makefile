@@ -75,7 +75,9 @@ push-agent-metax:
 
 build: build-controller build-agent
 
-push: push-controller push-mx-smi push-agent push-agent-metax
+build-all: build-controller build-agent build-agent-metax
+
+push: push-controller push-agent push-agent-metax
 
 image-agent: push-agent
 
@@ -83,9 +85,17 @@ image-agent-metax: push-agent-metax
 
 image-controller: push-controller
 
-images: push-controller push-mx-smi push-agent push-agent-metax
+images: push-controller push-agent push-agent-metax
 
 test:
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
+	go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
-.PHONY: build build-agent build-agent-metax build-controller build-mx-smi push push-agent push-agent-metax push-controller push-mx-smi images image-mx-smi image-agent image-agent-metax image-controller
+test-metax:
+	go test -tags=metax $$(go list ./... | grep -v /e2e)
+
+test-all: test test-metax
+
+helm-test:
+	./hack/verify-helm.sh
+
+.PHONY: build build-all build-agent build-agent-metax build-controller build-mx-smi push push-agent push-agent-metax push-controller push-mx-smi images image-mx-smi image-agent image-agent-metax image-controller test test-metax test-all helm-test
