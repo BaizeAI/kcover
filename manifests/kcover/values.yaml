@@ -5,21 +5,17 @@
 fullnameOverride: ""
 nameOverride: ""
 
-serviceAccount:
-  # Specifies whether a service account should be created
-  create: true
-  # Automatically mount a ServiceAccount's API credentials?
-  automount: true
-  # Annotations to add to the service account
-  annotations: {}
-  # The name of the service account to use.
-  # If not set and create is true, a name is generated using the fullname template
-  name: ""
-
 global:
   imageRegistry: ghcr.io
 
 agent:
+  serviceAccount:
+    # Specifies whether an agent ServiceAccount should be created.
+    create: true
+    # The name of the ServiceAccount to use. A name is generated when empty.
+    name: ""
+    annotations: {}
+
   # Agent deployment flavor. Supported values: base, metax.
   # base uses the generic multi-arch agent image; metax uses the MetaX-specific agent image
   # and enables MetaX-only host mounts.
@@ -60,7 +56,7 @@ agent:
   podSecurityContext: {}
     # fsGroup: 2000
   securityContext:
-    privileged: true
+    privileged: false
     # capabilities:
     #   drop:
     #   - ALL
@@ -108,6 +104,9 @@ agent:
 
   flavors:
     metax:
+      # The MetaX checks require privileged access to host devices.
+      securityContext:
+        privileged: true
       # Additional host resources used only by the MetaX image.
       volumes:
         - name: infiniband
@@ -130,6 +129,13 @@ agent:
   affinity: {}
 
 controller:
+  serviceAccount:
+    # Specifies whether a controller ServiceAccount should be created.
+    create: true
+    # The name of the ServiceAccount to use. A name is generated when empty.
+    name: ""
+    annotations: {}
+
   leaderElection:
     # Whether the controller should acquire and renew the Lease lock.
     # Default is true and should be kept for HA or multi-replica deployments.

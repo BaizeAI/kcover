@@ -111,6 +111,10 @@ helm upgrade kcover baizeai/kcover \
   --set agent.flavor=metax
 ```
 
+Setting `agent.flavor=metax` also makes the agent container privileged so it can
+access the required MetaX devices. The controller remains non-privileged and
+uses a separate ServiceAccount from the agent.
+
 If your MetaX nodes require HCA checks, set the HCA IDs as chart values too:
 
 ```shell
