@@ -151,8 +151,6 @@ func annotationsForEvent(event Event) map[string]string {
 	}
 
 	if IsPreflightEvent(event.Annotations) {
-		annotations[constants.PreflightNamespaceAnnotation] = event.Namespace
-		annotations[constants.PreflightPayloadAnnotation] = event.Message
 		return annotations
 	}
 

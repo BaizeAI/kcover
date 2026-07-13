@@ -32,6 +32,7 @@ type batchResult struct {
 
 type workloadKey struct {
 	namespace    string
+	workloadUID  string
 	workloadName string
 }
 
@@ -40,6 +41,8 @@ type workload struct {
 	expectedBatchCount  int
 	nodeReports         map[nodeName]nodeReport
 	lastReportAt        time.Time
+	firstObservedAt     time.Time
+	lastObservedAt      time.Time
 }
 
 type nodeReport struct {
@@ -58,6 +61,7 @@ const maxBatchCount = 5
 
 type WorkloadTimeoutError struct {
 	Namespace       string
+	WorkloadUID     string
 	WorkloadName    string
 	ReportedNodes   []string
 	ReceivedReports int
@@ -126,8 +130,18 @@ func (c *SlowNodeAggregator) SetNowForTest(now func() time.Time) {
 // AddReport 将单条 JSON 报告并入对应 workload。
 // 当返回 ready=true 时，slowNodes 是完整聚合后的慢节点结论。
 func (c *SlowNodeAggregator) AddReport(ns, workloadName, reportText string) (ready bool, slowNodes []string, err error) {
+	return c.AddReportForWorkload(ns, workloadName, workloadName, reportText, c.now())
+}
+
+func (c *SlowNodeAggregator) AddReportForWorkload(ns, workloadUID, workloadName, reportText string, observedAt time.Time) (ready bool, slowNodes []string, err error) {
 	if ns == "" || workloadName == "" {
 		return false, nil, fmt.Errorf("namespace and workload name must not be empty")
+	}
+	if workloadUID == "" {
+		return false, nil, fmt.Errorf("workload UID must not be empty")
+	}
+	if observedAt.IsZero() {
+		return false, nil, fmt.Errorf("report observation time must not be empty")
 	}
 
 	report, plan, batchResults, err := extractNodeReport(reportText)
@@ -139,24 +153,26 @@ func (c *SlowNodeAggregator) AddReport(ns, workloadName, reportText string) (rea
 	defer c.mu.Unlock()
 
 	now := c.now()
-	key := workloadKey{namespace: ns, workloadName: workloadName}
+	key := workloadKey{namespace: ns, workloadUID: workloadUID, workloadName: workloadName}
 	if expired, ok := c.expireWorkloadIfTimedOut(key, now); ok {
 		return false, nil, expired
 	}
-	wkl := c.workloadForReport(key, plan, now)
-
-	failFast := report.GPUCheck == CheckResultFail || report.StorageCheck == CheckResultFail
-	if !failFast && len(batchResults) == 0 {
-		klog.Warningf("preflight report has no batch results, falling back to fail-fast: namespace=%s workload=%s node=%s workloadSize=%d", ns, workloadName, report.NodeName, report.WorkloadSize)
-		failFast = true
-	}
-	np := nodeReport{
-		nodeName:     nodeName(report.NodeName),
-		selfIP:       nodeIP(report.NodeIP),
-		failFast:     failFast,
-		batchResults: batchResults}
-	wkl.nodeReports[nodeName(report.NodeName)] = np
+	wkl := c.workloadForReport(key, plan, now, observedAt)
 	wkl.lastReportAt = now
+	if observedAt.Before(wkl.firstObservedAt) {
+		wkl.firstObservedAt = observedAt
+	}
+	if observedAt.After(wkl.lastObservedAt) {
+		wkl.lastObservedAt = observedAt
+	}
+	if wkl.lastObservedAt.Sub(wkl.firstObservedAt) > c.timeout {
+		expired := c.buildTimeoutError(key, wkl)
+		wkl = c.ensureWorkload(key, plan, now, observedAt)
+		c.addNodeReport(key, wkl, report, batchResults)
+		return false, nil, expired
+	}
+
+	c.addNodeReport(key, wkl, report, batchResults)
 
 	if len(wkl.nodeReports) < wkl.expectedReportCount {
 		return false, nil, nil
@@ -168,10 +184,24 @@ func (c *SlowNodeAggregator) AddReport(ns, workloadName, reportText string) (rea
 	return true, slowNodes, nil
 }
 
-func (c *SlowNodeAggregator) workloadForReport(key workloadKey, plan workloadPlan, now time.Time) *workload {
+func (c *SlowNodeAggregator) addNodeReport(key workloadKey, wkl *workload, report Report, batchResults []batchResult) {
+	failFast := report.GPUCheck == CheckResultFail || report.StorageCheck == CheckResultFail
+	if !failFast && len(batchResults) == 0 {
+		klog.Warningf("preflight report has no batch results, falling back to fail-fast: namespace=%s workload=%s node=%s workloadSize=%d", key.namespace, key.workloadName, report.NodeName, report.WorkloadSize)
+		failFast = true
+	}
+	np := nodeReport{
+		nodeName:     nodeName(report.NodeName),
+		selfIP:       nodeIP(report.NodeIP),
+		failFast:     failFast,
+		batchResults: batchResults}
+	wkl.nodeReports[nodeName(report.NodeName)] = np
+}
+
+func (c *SlowNodeAggregator) workloadForReport(key workloadKey, plan workloadPlan, now, observedAt time.Time) *workload {
 	wkl, ok := c.workloads[key]
 	if !ok {
-		return c.ensureWorkload(key, plan, now)
+		return c.ensureWorkload(key, plan, now, observedAt)
 	}
 	if wkl.isSamePlan(plan) {
 		return wkl
@@ -186,15 +216,17 @@ func (c *SlowNodeAggregator) workloadForReport(key workloadKey, plan workloadPla
 		wkl.expectedReportCount,
 		wkl.expectedBatchCount,
 	)
-	return c.ensureWorkload(key, plan, now)
+	return c.ensureWorkload(key, plan, now, observedAt)
 }
 
-func (c *SlowNodeAggregator) ensureWorkload(key workloadKey, plan workloadPlan, now time.Time) *workload {
+func (c *SlowNodeAggregator) ensureWorkload(key workloadKey, plan workloadPlan, now, observedAt time.Time) *workload {
 	wkl := &workload{
 		expectedReportCount: plan.reportCount,
 		expectedBatchCount:  plan.batchCount,
 		nodeReports:         make(map[nodeName]nodeReport, plan.reportCount),
 		lastReportAt:        now,
+		firstObservedAt:     observedAt,
+		lastObservedAt:      observedAt,
 	}
 	c.workloads[key] = wkl
 	return wkl
@@ -260,6 +292,7 @@ func (c *SlowNodeAggregator) buildTimeoutError(key workloadKey, workload *worklo
 
 	return WorkloadTimeoutError{
 		Namespace:       key.namespace,
+		WorkloadUID:     key.workloadUID,
 		WorkloadName:    key.workloadName,
 		ReportedNodes:   reportedNodes,
 		ReceivedReports: len(workload.nodeReports),

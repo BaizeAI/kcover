@@ -2,21 +2,19 @@ package recovery
 
 import (
 	"errors"
-	"fmt"
-	"strings"
 	"time"
 
-	"github.com/baizeai/kcover/pkg/constants"
-	"github.com/baizeai/kcover/pkg/events"
+	kcoverv1alpha1 "github.com/baizeai/kcover/pkg/apis/kcover/v1alpha1"
 	"github.com/baizeai/kcover/pkg/preflight"
 
 	"github.com/jellydator/ttlcache/v3"
 )
 
-type preflightEventKey string
+type preflightReportKey string
 
 type preflightTracker struct {
-	processed    *ttlcache.Cache[preflightEventKey, time.Time]
+	processed    *ttlcache.Cache[preflightReportKey, time.Time]
+	workloads    map[string]map[preflightReportKey]struct{}
 	processedTTL time.Duration
 	aggregator   *preflight.SlowNodeAggregator
 }
@@ -35,82 +33,89 @@ func newPreflightTracker(reportCollectionTimeout time.Duration) *preflightTracke
 	}
 
 	return &preflightTracker{
-		processed:    ttlcache.New[preflightEventKey, time.Time](),
+		processed:    ttlcache.New[preflightReportKey, time.Time](),
+		workloads:    make(map[string]map[preflightReportKey]struct{}),
 		processedTTL: reportCollectionTimeout,
 		aggregator:   preflight.NewSlowNodeAggregator(reportCollectionTimeout),
 	}
 }
 
-func preflightEventNamespace(e events.Event) string {
-	if namespace := e.Annotations[constants.PreflightNamespaceAnnotation]; namespace != "" {
-		return namespace
-	}
-
-	return e.Namespace
-}
-
-func preflightEventKeyFromEvent(e events.Event) preflightEventKey {
-	key := e.Annotations[constants.PreflightDedupKeyAnnotation]
-
-	return preflightEventKey(key)
-}
-
 // markProcessed only deduplicates inside the current manager process lifetime.
-// If the manager restarts or leadership moves, previously seen events can
-// still be observed and processed again unless the dedup state is externalized.
-func (s *preflightTracker) markProcessed(e events.Event) (bool, error) {
-	key := preflightEventKeyFromEvent(e)
-	if key == "" {
-		return false, fmt.Errorf("missing annotation %s", constants.PreflightDedupKeyAnnotation)
-	}
-	if s.processed.Get(key, ttlcache.WithDisableTouchOnHit[preflightEventKey, time.Time]()) != nil {
-		return true, nil
+// A controller restart rebuilds aggregation state by listing the durable reports.
+func (s *preflightTracker) markProcessed(report *kcoverv1alpha1.PreflightReport) bool {
+	key := preflightReportKey(report.Namespace + "/" + report.Name)
+	if s.processed.Get(key, ttlcache.WithDisableTouchOnHit[preflightReportKey, time.Time]()) != nil {
+		return true
 	}
 	s.processed.Set(key, time.Now().Add(s.processedTTL), s.processedTTL)
-	return false, nil
+	workloadKey := report.Namespace + "/" + report.Spec.WorkloadUID
+	if s.workloads[workloadKey] == nil {
+		s.workloads[workloadKey] = make(map[preflightReportKey]struct{})
+	}
+	s.workloads[workloadKey][key] = struct{}{}
+	return false
 }
 
 func (s *preflightTracker) cleanupProcessed() {
 	s.processed.DeleteExpired()
-}
-
-func (s *preflightTracker) cleanupProcessedForWorkload(namespace, workloadName string) {
-	if s == nil || namespace == "" || workloadName == "" {
-		return
-	}
-
-	prefix := preflightEventKey(namespace + "/" + workloadName + "/")
-	for key := range s.processed.Items() {
-		if strings.HasPrefix(string(key), string(prefix)) {
-			s.processed.Delete(key)
+	for workloadKey, keys := range s.workloads {
+		for key := range keys {
+			if s.processed.Get(key, ttlcache.WithDisableTouchOnHit[preflightReportKey, time.Time]()) == nil {
+				delete(keys, key)
+			}
+		}
+		if len(keys) == 0 {
+			delete(s.workloads, workloadKey)
 		}
 	}
 }
 
-func (s *preflightTracker) handleReport(e events.Event) (preflightReportResult, error) {
+func (s *preflightTracker) cleanupProcessedReport(report *kcoverv1alpha1.PreflightReport) {
+	key := preflightReportKey(report.Namespace + "/" + report.Name)
+	s.processed.Delete(key)
+	workloadKey := report.Namespace + "/" + report.Spec.WorkloadUID
+	delete(s.workloads[workloadKey], key)
+	if len(s.workloads[workloadKey]) == 0 {
+		delete(s.workloads, workloadKey)
+	}
+}
+
+func (s *preflightTracker) cleanupProcessedForWorkload(namespace, workloadUID string) {
+	if s == nil || namespace == "" || workloadUID == "" {
+		return
+	}
+
+	workloadKey := namespace + "/" + workloadUID
+	for key := range s.workloads[workloadKey] {
+		s.processed.Delete(key)
+	}
+	delete(s.workloads, workloadKey)
+}
+
+func (s *preflightTracker) handleReport(report *kcoverv1alpha1.PreflightReport) (preflightReportResult, error) {
 	if s == nil || s.aggregator == nil {
 		return preflightReportResult{skipped: true}, nil
 	}
 
-	namespace := preflightEventNamespace(e)
-	workloadName := e.Annotations[constants.PreflightWorkloadAnnotation]
-	if workloadName == "" {
+	namespace := report.Namespace
+	workloadName := report.Spec.WorkloadName
+	workloadUID := report.Spec.WorkloadUID
+	if workloadName == "" || workloadUID == "" || report.Spec.ObservedAt.IsZero() {
 		return preflightReportResult{skipped: true}, nil
 	}
 
-	duplicate, err := s.markProcessed(e)
-	if err != nil {
-		return preflightReportResult{}, err
-	}
+	duplicate := s.markProcessed(report)
 	if duplicate {
 		return preflightReportResult{workloadName: workloadName, skipped: true, duplicate: true}, nil
 	}
 
-	ready, slowNodes, err := s.aggregator.AddReport(namespace, workloadName, e.Message)
+	ready, slowNodes, err := s.aggregator.AddReportForWorkload(namespace, workloadUID, workloadName, report.Spec.Report, report.Spec.ObservedAt.Time)
 	if err != nil {
 		var timeoutErr preflight.WorkloadTimeoutError
 		if errors.As(err, &timeoutErr) {
-			s.cleanupProcessedForWorkload(timeoutErr.Namespace, timeoutErr.WorkloadName)
+			s.cleanupProcessedForWorkload(timeoutErr.Namespace, timeoutErr.WorkloadUID)
+		} else {
+			s.cleanupProcessedReport(report)
 		}
 		return preflightReportResult{workloadName: workloadName}, err
 	}
@@ -118,7 +123,7 @@ func (s *preflightTracker) handleReport(e events.Event) (preflightReportResult, 
 		return preflightReportResult{workloadName: workloadName, waiting: true}, nil
 	}
 
-	s.cleanupProcessedForWorkload(namespace, workloadName)
+	s.cleanupProcessedForWorkload(namespace, workloadUID)
 
 	return preflightReportResult{workloadName: workloadName, slowNodes: slowNodes}, nil
 }
@@ -135,7 +140,7 @@ func (s *preflightTracker) sweepExpired() []preflight.WorkloadTimeoutError {
 
 	errs := s.aggregator.ExpireTimedOutWorkloads()
 	for _, err := range errs {
-		s.cleanupProcessedForWorkload(err.Namespace, err.WorkloadName)
+		s.cleanupProcessedForWorkload(err.Namespace, err.WorkloadUID)
 	}
 
 	return errs

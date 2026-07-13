@@ -2,7 +2,6 @@ package events
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/baizeai/kcover/pkg/constants"
@@ -85,7 +84,7 @@ func (bridge *kubeEventBridge) shouldWatchEvent(obj any) bool {
 	}
 
 	if IsPreflightEvent(event.Annotations) {
-		return true
+		return false
 	}
 
 	if event.Annotations[constants.NeedRecoveryAnnotation] != constants.True {
@@ -104,8 +103,7 @@ func (bridge *kubeEventBridge) handleK8sEventAdd(ctx context.Context, obj any, i
 	if !ok {
 		return
 	}
-	// Preflight Events still carry report data; only recovery Events are unsafe to replay.
-	if isInInitialList && !IsPreflightEvent(event.Annotations) {
+	if isInInitialList {
 		return
 	}
 
@@ -211,7 +209,7 @@ func (bridge *kubeEventBridge) isExpiredEvent(event *corev1.Event, now time.Time
 
 func (bridge *kubeEventBridge) toInternalEvent(event *corev1.Event) (Event, bool) {
 	if IsPreflightEvent(event.Annotations) {
-		return bridge.toInternalPreflightEvent(event)
+		return Event{}, false
 	}
 
 	if event.Annotations[constants.NeedRecoveryAnnotation] != constants.True {
@@ -219,27 +217,6 @@ func (bridge *kubeEventBridge) toInternalEvent(event *corev1.Event) (Event, bool
 	}
 
 	return bridge.toInternalRecoveryEvent(event)
-}
-
-func (bridge *kubeEventBridge) toInternalPreflightEvent(event *corev1.Event) (Event, bool) {
-	obj := event.InvolvedObject
-	if !isNodeObjectRef(obj) {
-		return Event{}, false
-	}
-
-	payload, err := bridge.extractPreflightPayload(event)
-	if err != nil {
-		klog.ErrorS(err, "failed to load preflight payload", "node", obj.Name)
-		return Event{}, false
-	}
-	return Event{
-		ResourceType: Node,
-		Namespace:    event.Annotations[constants.PreflightNamespaceAnnotation],
-		Name:         obj.Name,
-		EventType:    Error,
-		Message:      payload,
-		Annotations:  copyAnnotations(event.Annotations),
-	}, true
 }
 
 func (bridge *kubeEventBridge) toInternalRecoveryEvent(event *corev1.Event) (Event, bool) {
@@ -269,13 +246,6 @@ func (bridge *kubeEventBridge) toInternalRecoveryEvent(event *corev1.Event) (Eve
 		}, true
 	}
 	return Event{}, false
-}
-
-func (bridge *kubeEventBridge) extractPreflightPayload(event *corev1.Event) (string, error) {
-	if payload := event.Annotations[constants.PreflightPayloadAnnotation]; payload != "" {
-		return payload, nil
-	}
-	return "", fmt.Errorf("preflight payload annotation %s is empty", constants.PreflightPayloadAnnotation)
 }
 
 func isNodeObjectRef(ref corev1.ObjectReference) bool {

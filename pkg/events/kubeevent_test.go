@@ -12,7 +12,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-func TestRecordEventStoresPreflightPayloadInEventAnnotation(t *testing.T) {
+func TestRecordEventDoesNotStorePreflightPayload(t *testing.T) {
 	t.Parallel()
 
 	client := fake.NewSimpleClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}})
@@ -50,21 +50,17 @@ func TestRecordEventStoresPreflightPayloadInEventAnnotation(t *testing.T) {
 	if stored.Message != "preflight report available for workload(job-a) on node(node-a)" {
 		t.Fatalf("event message = %q, want %q", stored.Message, "preflight report available for workload(job-a) on node(node-a)")
 	}
-	if stored.Annotations[constants.PreflightPayloadAnnotation] != payload {
-		t.Fatalf("event preflight payload annotation = %q, want %q", stored.Annotations[constants.PreflightPayloadAnnotation], payload)
-	}
-	if stored.Annotations[constants.PreflightNamespaceAnnotation] != "default" {
-		t.Fatalf("event preflight namespace annotation = %q, want %q", stored.Annotations[constants.PreflightNamespaceAnnotation], "default")
+	if len(stored.Annotations) != 1 || stored.Annotations[constants.PreflightWorkloadAnnotation] != "job-a" {
+		t.Fatalf("event annotations = %v, want workload observation only", stored.Annotations)
 	}
 	if stored.InvolvedObject.Namespace != stored.Namespace {
 		t.Fatalf("involved object namespace = %q, want %q", stored.InvolvedObject.Namespace, stored.Namespace)
 	}
 }
 
-func TestToInternalEventHydratesPreflightPayloadFromEventAnnotation(t *testing.T) {
+func TestToInternalEventRejectsPreflightObservation(t *testing.T) {
 	t.Parallel()
 
-	payload := `{"workload_size":2,"rank":0,"node_name":"node-a","gpu_check":1,"storage_check":1,"batches":[{"batch_idx":0,"pair":["10.0.0.1","10.0.0.2"],"self_ip":"10.0.0.1","status":"fail"}]}`
 	client := fake.NewSimpleClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}})
 	bridge := NewKubeEventBridge(client).(*kubeEventBridge)
 
@@ -73,9 +69,7 @@ func TestToInternalEventHydratesPreflightPayloadFromEventAnnotation(t *testing.T
 			Name:      "preflight-event",
 			Namespace: "default",
 			Annotations: map[string]string{
-				constants.PreflightNamespaceAnnotation: "train-ns",
-				constants.PreflightPayloadAnnotation:   payload,
-				constants.PreflightWorkloadAnnotation:  "job-a",
+				constants.PreflightWorkloadAnnotation: "job-a",
 			},
 		},
 		Message: "preflight report available for workload job-a on node node-a",
@@ -86,17 +80,8 @@ func TestToInternalEventHydratesPreflightPayloadFromEventAnnotation(t *testing.T
 			FieldPath:  "",
 		},
 	})
-	if !ok {
-		t.Fatal("toInternalEvent(...) ok = false, want true")
-	}
-	if event.Namespace != "train-ns" {
-		t.Fatalf("event.Namespace = %q, want %q", event.Namespace, "train-ns")
-	}
-	if event.Message != payload {
-		t.Fatalf("event.Message = %q, want %q", event.Message, payload)
-	}
-	if event.Annotations[constants.PreflightWorkloadAnnotation] != "job-a" {
-		t.Fatalf("job annotation = %q, want %q", event.Annotations[constants.PreflightWorkloadAnnotation], "job-a")
+	if ok {
+		t.Fatalf("toInternalEvent(...) = %+v, true, want preflight Event ignored", event)
 	}
 }
 
@@ -115,12 +100,12 @@ func TestReasonForEventUsesDay2ReasonForNodeEvent(t *testing.T) {
 	}
 }
 
-func TestShouldWatchEventAllowsPreflightNodeEvent(t *testing.T) {
+func TestShouldWatchEventRejectsPreflightObservation(t *testing.T) {
 	t.Parallel()
 
 	bridge := NewKubeEventBridge(fake.NewSimpleClientset()).(*kubeEventBridge)
 
-	if !bridge.shouldWatchEvent(&corev1.Event{
+	if bridge.shouldWatchEvent(&corev1.Event{
 		ObjectMeta: metav1.ObjectMeta{
 			CreationTimestamp: metav1.Now(),
 			Annotations: map[string]string{
@@ -129,7 +114,7 @@ func TestShouldWatchEventAllowsPreflightNodeEvent(t *testing.T) {
 		},
 		InvolvedObject: corev1.ObjectReference{APIVersion: "v1", Kind: "Node", Name: "node-a"},
 	}) {
-		t.Fatal("shouldWatchEvent(preflight node event) = false, want true")
+		t.Fatal("shouldWatchEvent(preflight observation) = true, want false")
 	}
 }
 
@@ -297,34 +282,6 @@ func TestHandleK8sEventAddSkipsInitialListEvent(t *testing.T) {
 	}
 }
 
-func TestHandleK8sEventAddKeepsInitialPreflightReport(t *testing.T) {
-	t.Parallel()
-
-	payload := `{"workload_size":2,"rank":0,"node_name":"node-a","gpu_check":1,"storage_check":1}`
-	bridge := NewKubeEventBridge(fake.NewSimpleClientset()).(*kubeEventBridge)
-	bridge.handleK8sEventAdd(context.Background(), &corev1.Event{
-		ObjectMeta: metav1.ObjectMeta{
-			CreationTimestamp: metav1.Now(),
-			Namespace:         "default",
-			Annotations: map[string]string{
-				constants.PreflightWorkloadAnnotation:  "job-a",
-				constants.PreflightNamespaceAnnotation: "train-ns",
-				constants.PreflightPayloadAnnotation:   payload,
-			},
-		},
-		InvolvedObject: corev1.ObjectReference{APIVersion: "v1", Kind: "Node", Name: "node-a"},
-	}, true)
-
-	select {
-	case event := <-bridge.EventChan():
-		if event.Message != payload || !IsPreflightEvent(event.Annotations) {
-			t.Fatalf("initial preflight event = %+v, want preserved report", event)
-		}
-	default:
-		t.Fatal("initial preflight report was dropped")
-	}
-}
-
 func TestHandleK8sEventAddQueuesDay2EventWhenEventChannelIsFull(t *testing.T) {
 	t.Parallel()
 
@@ -373,59 +330,6 @@ func TestHandleK8sEventAddQueuesDay2EventWhenEventChannelIsFull(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("handleK8sEventAdd(day2) forwarded no event, want one")
-	}
-}
-
-func TestHandleK8sEventAddQueuesPreflightEventWhenEventChannelIsFull(t *testing.T) {
-	t.Parallel()
-
-	payload := `{"workload_size":2,"rank":0,"node_name":"node-a","gpu_check":1,"storage_check":1}`
-	bridge := NewKubeEventBridge(fake.NewSimpleClientset()).(*kubeEventBridge)
-	bridge.eventCh = make(chan Event, 1)
-	bridge.eventCh <- Event{ResourceType: Pod, Namespace: "default", Name: "existing", EventType: Error}
-	startQueueWorkerForTest(t, bridge)
-	defer bridge.Stop()
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		bridge.handleK8sEventAdd(context.Background(), &corev1.Event{
-			ObjectMeta: metav1.ObjectMeta{
-				CreationTimestamp: metav1.Now(),
-				Namespace:         "default",
-				Annotations: map[string]string{
-					constants.PreflightWorkloadAnnotation:  "job-a",
-					constants.PreflightNamespaceAnnotation: "train-ns",
-					constants.PreflightPayloadAnnotation:   payload,
-				},
-			},
-			Message:        "preflight report available",
-			InvolvedObject: corev1.ObjectReference{APIVersion: "v1", Kind: "Node", Name: "node-a"},
-		}, false)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("handleK8sEventAdd(preflight) did not return after queueing the event")
-	}
-
-	select {
-	case event := <-bridge.eventCh:
-		if event.Name != "existing" {
-			t.Fatalf("first queued event name = %q, want existing", event.Name)
-		}
-	case <-time.After(50 * time.Millisecond):
-		t.Fatal("existing buffered event was not readable")
-	}
-
-	select {
-	case event := <-bridge.eventCh:
-		if event.ResourceType != Node || event.Name != "node-a" || event.Message != payload || !IsPreflightEvent(event.Annotations) {
-			t.Fatalf("forwarded event = %+v, want preflight node event", event)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("handleK8sEventAdd(preflight) forwarded no event, want one")
 	}
 }
 

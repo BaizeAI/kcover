@@ -21,6 +21,11 @@ type PodRule interface {
 	OnUpdate(oldPod, newPod *corev1.Pod) []events.Event
 }
 
+type InitialListPodRule interface {
+	PodRule
+	HandleInitialList() bool
+}
+
 type observer struct {
 	client   kubernetes.Interface
 	sink     events.Sink
@@ -118,15 +123,21 @@ func (o *observer) Start() error {
 }
 
 func (o *observer) handleAdd(obj any, isInInitialList bool) {
-	if isInInitialList {
-		return
-	}
-
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
 		return
 	}
-	o.onAdd(pod)
+	if !isInInitialList {
+		o.onAdd(pod)
+		return
+	}
+
+	for _, rule := range o.rules {
+		initialRule, ok := rule.(InitialListPodRule)
+		if ok && initialRule.HandleInitialList() {
+			o.publish(rule, rule.OnAdd(pod))
+		}
+	}
 }
 
 func (o *observer) Stop() {

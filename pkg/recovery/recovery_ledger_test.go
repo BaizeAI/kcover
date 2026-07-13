@@ -16,8 +16,8 @@ func TestRecoveryLedgerPersistsRestartWindowAcrossControllers(t *testing.T) {
 
 	client := fake.NewSimpleClientset()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	first := NewController(client, nil, 0, 0)
-	second := NewController(client, nil, 0, 0)
+	first := NewController(client, nil, nil, 0, 0)
+	second := NewController(client, nil, nil, 0, 0)
 	first.restartLedger.now = func() time.Time { return now }
 	second.restartLedger.now = func() time.Time { return now.Add(10 * time.Second) }
 
@@ -51,7 +51,7 @@ func TestRecoveryLedgerAllowsRestartAfterRetryWindow(t *testing.T) {
 
 	client := fake.NewSimpleClientset()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	controller := NewController(client, nil, 0, 0)
+	controller := NewController(client, nil, nil, 0, 0)
 	controller.restartLedger.now = func() time.Time { return now }
 
 	restartAllowed, err := controller.allowJobRestart(context.Background(), "train-ns", "job-a")

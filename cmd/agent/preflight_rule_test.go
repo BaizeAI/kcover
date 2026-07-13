@@ -1,9 +1,12 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	kcoverv1alpha1 "github.com/baizeai/kcover/pkg/apis/kcover/v1alpha1"
 	"github.com/baizeai/kcover/pkg/constants"
 	"github.com/baizeai/kcover/pkg/events"
 	"github.com/baizeai/kcover/pkg/preflight"
@@ -19,15 +22,99 @@ func (agentStubSink) RecordEvent(events.Event) error {
 	return nil
 }
 
+type agentStubReportPublisher struct{}
+
+func (agentStubReportPublisher) SubmitReport(*kcoverv1alpha1.PreflightReport) error {
+	return nil
+}
+
+type recordingReportPublisher struct {
+	reports []*kcoverv1alpha1.PreflightReport
+	names   map[string]struct{}
+}
+
+func (s *recordingReportPublisher) SubmitReport(report *kcoverv1alpha1.PreflightReport) error {
+	if s.names == nil {
+		s.names = make(map[string]struct{})
+	}
+	key := report.Namespace + "/" + report.Name
+	if _, exists := s.names[key]; exists {
+		return nil
+	}
+	s.names[key] = struct{}{}
+	s.reports = append(s.reports, report)
+	return nil
+}
+
 func TestNewPreflightObserverReturnsObserver(t *testing.T) {
 	t.Parallel()
 
-	observer, err := newPreflightObserver(fake.NewSimpleClientset(), agentStubSink{}, "node-a")
+	observer, err := newPreflightObserver(fake.NewSimpleClientset(), agentStubSink{}, agentStubReportPublisher{}, "node-a")
 	if err != nil {
 		t.Fatalf("newPreflightObserver() error = %v", err)
 	}
 	if observer == nil {
 		t.Fatal("newPreflightObserver() = nil, want observer")
+	}
+}
+
+func TestPreflightRuleSubmitsReportIdempotently(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(baseDir, "train-ns"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	payload := `{"version":1,"workload":"job-a","workload_size":2,"rank":0,"node_name":"node-a","node_ip":"10.0.0.1","gpu_check":1,"storage_check":1,"batches":[]}`
+	if err := os.WriteFile(preflight.ReportPath(baseDir, "train-ns", "job-a-0"), []byte(payload), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	oldPod := &corev1.Pod{Status: corev1.PodStatus{InitContainerStatuses: []corev1.ContainerStatus{{
+		Name:  preflightInitContainerName,
+		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+	}}}}
+	newPod := oldPod.DeepCopy()
+	controller := true
+	newPod.ObjectMeta = metav1.ObjectMeta{
+		Name:      "job-a-worker-0",
+		Namespace: "train-ns",
+		UID:       "pod-uid",
+		Labels: map[string]string{
+			constants.PreflightLabel:    constants.True,
+			constants.BatchJobNameLabel: "job-a",
+		},
+		Annotations: map[string]string{constants.BatchJobCompletionIndexAnnotation: "0"},
+		OwnerReferences: []metav1.OwnerReference{{
+			APIVersion: "batch/v1",
+			Kind:       "Job",
+			Name:       "job-a",
+			UID:        "job-uid",
+			Controller: &controller,
+		}},
+	}
+	newPod.Spec.NodeName = "node-a"
+	newPod.Status.InitContainerStatuses = []corev1.ContainerStatus{{
+		Name:  preflightInitContainerName,
+		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0, FinishedAt: metav1.NewTime(time.Unix(100, 0))}},
+	}}
+
+	publisher := &recordingReportPublisher{}
+	rule := preflightRule{baseDir: baseDir, publisher: publisher}
+	observations := rule.OnUpdate(oldPod, newPod)
+	if len(publisher.reports) != 1 {
+		t.Fatalf("submitted reports = %d, want 1", len(publisher.reports))
+	}
+	if len(observations) != 0 {
+		t.Fatalf("observation events returned by rule = %d, want 0", len(observations))
+	}
+	if len(publisher.reports[0].OwnerReferences) != 1 || publisher.reports[0].OwnerReferences[0].UID != newPod.UID {
+		t.Fatalf("report ownerReferences = %v, want source Pod", publisher.reports[0].OwnerReferences)
+	}
+
+	observations = rule.OnAdd(newPod)
+	if len(observations) != 0 || len(publisher.reports) != 1 {
+		t.Fatalf("initial-list reconciliation = %d observations, %d reports; want 0 observations and one idempotent submission", len(observations), len(publisher.reports))
 	}
 }
 
@@ -50,71 +137,19 @@ func TestShouldHandlePreflightPodUpdate(t *testing.T) {
 		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}},
 	}}
 
-	if !shouldHandlePodUpdate(oldPod, newPod) {
+	if !shouldReconcilePreflightPod(newPod) {
 		t.Fatal("shouldHandlePreflightPodUpdate(oldPod, newPod) = false, want true")
 	}
 
 	unchangedFailed := newPod.DeepCopy()
-	if shouldHandlePodUpdate(newPod, unchangedFailed) {
-		t.Fatal("shouldHandlePreflightPodUpdate(newPod, unchangedFailed) = true, want false")
-	}
-}
-
-func TestIsPreflightCompletedTransition(t *testing.T) {
-	t.Parallel()
-
-	oldStatuses := []corev1.ContainerStatus{{
-		Name:  "preflight",
-		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
-	}}
-	newStatuses := []corev1.ContainerStatus{{
-		Name:  "preflight",
-		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 1}},
-	}}
-
-	if !isPreflightCompleted(oldStatuses, newStatuses) {
-		t.Fatal("isPreflightCompletedTransition(oldStatuses, newStatuses) = false, want true")
-	}
-}
-
-func TestIsPreflightCompletedTransitionRequiresExactPreflightName(t *testing.T) {
-	t.Parallel()
-
-	oldStatuses := []corev1.ContainerStatus{{
-		Name:  "other-init",
-		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
-	}}
-	newStatuses := []corev1.ContainerStatus{{
-		Name:  "other-init",
-		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 1}},
-	}}
-
-	if isPreflightCompleted(oldStatuses, newStatuses) {
-		t.Fatal("isPreflightCompletedTransition(oldStatuses, newStatuses) = true, want false")
-	}
-}
-
-func TestIsPreflightCompletedTransitionWithSucceededStatus(t *testing.T) {
-	t.Parallel()
-
-	oldStatuses := []corev1.ContainerStatus{{
-		Name:  "preflight",
-		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
-	}}
-	newStatuses := []corev1.ContainerStatus{{
-		Name:  "preflight",
-		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}},
-	}}
-
-	if !isPreflightCompleted(oldStatuses, newStatuses) {
-		t.Fatal("isPreflightCompletedTransition(oldStatuses, newStatuses) = false, want true")
+	if !shouldReconcilePreflightPod(unchangedFailed) {
+		t.Fatal("shouldHandlePreflightPodUpdate(newPod, unchangedFailed) = false, want true for idempotent reconciliation")
 	}
 }
 
 func TestShouldHandlePreflightPodUpdateRequiresLabel(t *testing.T) {
 	t.Parallel()
 
-	oldPod := &corev1.Pod{}
 	newPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{}},
 		Status: corev1.PodStatus{InitContainerStatuses: []corev1.ContainerStatus{{
@@ -123,8 +158,26 @@ func TestShouldHandlePreflightPodUpdateRequiresLabel(t *testing.T) {
 		}}},
 	}
 
-	if shouldHandlePodUpdate(oldPod, newPod) {
+	if shouldReconcilePreflightPod(newPod) {
 		t.Fatal("shouldHandlePreflightPodUpdate(oldPod, newPod) = true, want false")
+	}
+}
+
+func TestPreflightRuleOnAddRequiresLabel(t *testing.T) {
+	t.Parallel()
+
+	publisher := &recordingReportPublisher{}
+	rule := preflightRule{publisher: publisher}
+	pod := &corev1.Pod{
+		Status: corev1.PodStatus{InitContainerStatuses: []corev1.ContainerStatus{{
+			Name:  preflightInitContainerName,
+			State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{FinishedAt: metav1.NewTime(time.Unix(100, 0))}},
+		}}},
+	}
+
+	rule.OnAdd(pod)
+	if len(publisher.reports) != 0 {
+		t.Fatalf("submitted reports for unlabeled initial Pod = %d, want 0", len(publisher.reports))
 	}
 }
 

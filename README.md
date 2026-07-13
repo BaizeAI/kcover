@@ -171,14 +171,24 @@ Once installed, `kcover` will automatically monitor the labeled resources for an
 - Pairwise slow-node detection marks a node as slow only when its node IP
   appears in failed observations across every effective batch considered by the
   aggregation logic.
-- Agent-side node events carry a compacted preflight payload rather than the
-  raw host report. The compacted payload keeps only manager-required fields:
+- Agents store each compacted payload as a namespaced `PreflightReport`
+  (`kcover.io/v1alpha1`) owned by the source Pod. Kubernetes Events contain
+  only a short human-readable notification and are not used to transport the
+  report. Reports are grouped by workload UID, so reusing a workload name does
+  not combine different workload runs. Agents retry transient report creation
+  failures with capped exponential backoff. The compacted payload keeps only manager-required fields:
   report identity plus per-batch `batch_idx`, `pair`, `self_ip`, `status`, and
   performance fields needed for bus-bandwidth threshold evaluation.
 - Incomplete report collections no longer wait forever. The controller expires
   stale job aggregations after the controller flag
-  `--preflight-report-collection-timeout` and emits a warning event describing
+  `--preflight-report-collection-timeout` and logs a warning describing
   how many reports were received.
+
+Inspect current reports with:
+
+```shell
+kubectl get preflightreports -A
+```
 
 Supported compacted report threshold field:
 

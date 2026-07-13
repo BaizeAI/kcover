@@ -118,6 +118,15 @@ rules:
       - list
       - watch
   - apiGroups:
+      - kcover.io
+    resources:
+      - preflightreports
+    verbs:
+      - create
+      - get
+      - list
+      - watch
+  - apiGroups:
     - coordination.k8s.io
     resources:
     - leases

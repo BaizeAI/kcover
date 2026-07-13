@@ -49,16 +49,3 @@ type Stream interface {
 func IsPreflightEvent(annotations map[string]string) bool {
 	return annotations[constants.PreflightWorkloadAnnotation] != ""
 }
-
-func copyAnnotations(src map[string]string) map[string]string {
-	if len(src) == 0 {
-		return nil
-	}
-
-	dst := make(map[string]string, len(src))
-	for key, value := range src {
-		dst[key] = value
-	}
-
-	return dst
-}

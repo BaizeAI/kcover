@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	kcoverv1alpha1 "github.com/baizeai/kcover/pkg/apis/kcover/v1alpha1"
 	"github.com/baizeai/kcover/pkg/constants"
 	"github.com/baizeai/kcover/pkg/events"
 	"github.com/baizeai/kcover/pkg/kube"
@@ -20,7 +21,7 @@ import (
 type RecoveryController struct {
 	client                 kubernetes.Interface
 	eventStream            events.Stream
-	eventSink              events.Sink
+	reportStream           preflight.ReportStream
 	cancel                 context.CancelFunc
 	doneCh                 chan struct{}
 	preflight              *preflightTracker
@@ -31,20 +32,21 @@ type RecoveryController struct {
 
 const DefaultPreflightSweepInterval = time.Minute
 
-func NewController(cli kubernetes.Interface, stream events.Stream, preflightReportCollectionTimeout, preflightSweepInterval time.Duration) *RecoveryController {
+func NewController(cli kubernetes.Interface, stream events.Stream, reportStream preflight.ReportStream, preflightReportCollectionTimeout, preflightSweepInterval time.Duration) *RecoveryController {
 	if preflightSweepInterval <= 0 {
 		preflightSweepInterval = DefaultPreflightSweepInterval
 	}
 
-	return &RecoveryController{
+	controller := &RecoveryController{
 		client:                 cli,
 		eventStream:            stream,
-		eventSink:              events.NewKubeEventSink(cli),
+		reportStream:           reportStream,
 		preflight:              newPreflightTracker(preflightReportCollectionTimeout),
 		preflightSweepInterval: preflightSweepInterval,
 		restartDuration:        time.Second * 30,
 		restartLedger:          newRecoveryLedger(cli, kube.CurrentNamespace()),
 	}
+	return controller
 }
 
 func (r *RecoveryController) handlePreflightTimeout(timeoutErr preflight.WorkloadTimeoutError) {
@@ -222,44 +224,44 @@ func (r *RecoveryController) listJobsOnNode(ctx context.Context, nodeName string
 	return items, nil
 }
 
-func (r *RecoveryController) onPreflightReport(ctx context.Context, namespace string, e events.Event) {
-	klog.V(2).InfoS("handle preflight report", "namespace", namespace, "node", e.Name, "annotations", e.Annotations, "messageBytes", len(e.Message))
+func (r *RecoveryController) onPreflightReport(ctx context.Context, report *kcoverv1alpha1.PreflightReport) {
+	klog.V(2).InfoS("handle PreflightReport", "namespace", report.Namespace, "name", report.Name, "node", report.Spec.NodeName, "workload", report.Spec.WorkloadName, "reportBytes", len(report.Spec.Report))
 
-	result, err := r.preflight.handleReport(e)
+	result, err := r.preflight.handleReport(report)
 	if err != nil {
 		var timeoutErr preflight.WorkloadTimeoutError
 		if errors.As(err, &timeoutErr) {
 			r.handlePreflightTimeout(timeoutErr)
 			return
 		}
-		klog.ErrorS(err, "failed to aggregate preflight report", "namespace", namespace, "node", e.Name)
+		klog.ErrorS(err, "failed to aggregate PreflightReport", "namespace", report.Namespace, "name", report.Name, "node", report.Spec.NodeName)
 		return
 	}
 
 	if result.skipped && result.workloadName == "" {
-		klog.V(2).InfoS("skip preflight report event", "namespace", namespace, "node", e.Name, "reason", "collector unavailable or workload annotation missing")
+		klog.V(2).InfoS("skip PreflightReport", "namespace", report.Namespace, "name", report.Name, "node", report.Spec.NodeName, "reason", "collector unavailable or workload name missing")
 		return
 	}
 
 	if result.duplicate {
-		klog.V(2).InfoS("skip duplicate preflight report", "namespace", namespace, "node", e.Name, "workload", result.workloadName)
+		klog.V(2).InfoS("skip duplicate PreflightReport", "namespace", report.Namespace, "name", report.Name, "node", report.Spec.NodeName, "workload", result.workloadName)
 		return
 	}
 
 	if result.waiting {
-		klog.V(2).InfoS("buffer preflight report", "namespace", namespace, "workload", result.workloadName, "state", "waiting")
+		klog.V(2).InfoS("buffer PreflightReport", "namespace", report.Namespace, "workload", result.workloadName, "state", "waiting")
 		return
 	}
 
 	if len(result.slowNodes) == 0 {
-		klog.InfoS("preflight report finished without slow nodes", "namespace", namespace, "workload", result.workloadName)
+		klog.InfoS("preflight report finished without slow nodes", "namespace", report.Namespace, "workload", result.workloadName)
 		return
 	}
 
-	klog.InfoS("preflight report finished with slow nodes", "namespace", namespace, "workload", result.workloadName, "slowNodes", result.slowNodes)
+	klog.InfoS("preflight report finished with slow nodes", "namespace", report.Namespace, "workload", result.workloadName, "slowNodes", result.slowNodes)
 
 	for _, node := range result.slowNodes {
-		klog.V(2).InfoS("preflight marked slow node", "node", node, "namespace", namespace, "workload", result.workloadName)
+		klog.V(2).InfoS("preflight marked slow node", "node", node, "namespace", report.Namespace, "workload", result.workloadName)
 		r.ensureNodeUnschedulable(ctx, node)
 	}
 }
@@ -279,11 +281,6 @@ func (r *RecoveryController) onEvent(ctx context.Context, e events.Event) {
 			r.onPodError(ctx, e.Namespace, e.Name)
 		}
 	case events.Node:
-		if events.IsPreflightEvent(e.Annotations) {
-			klog.V(2).InfoS("dispatch preflight event", "namespace", e.Namespace, "node", e.Name)
-			r.onPreflightReport(ctx, e.Namespace, e)
-			return
-		}
 		klog.V(2).InfoS("dispatch node event", "node", e.Name)
 		r.onNodeError(ctx, e)
 	default:
@@ -304,6 +301,10 @@ func (r *RecoveryController) Start() error {
 		ticker := time.NewTicker(r.preflightSweepInterval)
 		defer ticker.Stop()
 		eventCh := r.eventStream.EventChan()
+		var reportCh <-chan *kcoverv1alpha1.PreflightReport
+		if r.reportStream != nil {
+			reportCh = r.reportStream.Reports()
+		}
 		for {
 			select {
 			case <-ctx.Done():
@@ -318,6 +319,13 @@ func (r *RecoveryController) Start() error {
 					return
 				}
 				r.onEvent(ctx, e)
+
+			case report, ok := <-reportCh:
+				if !ok {
+					reportCh = nil
+					continue
+				}
+				r.onPreflightReport(ctx, report)
 			}
 		}
 

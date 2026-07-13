@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
+	"time"
 
 	"github.com/baizeai/kcover/pkg/constants"
 	"github.com/baizeai/kcover/pkg/events"
@@ -160,27 +160,22 @@ func TestReportPath(t *testing.T) {
 func TestReportToEvent(t *testing.T) {
 	t.Parallel()
 
-	event, err := BuildEventFromReport("default", "node-a", "job-a", `{"version":1,"rank":0,"node_name":"node-a"}`)
+	report, err := BuildPreflightReport("default", "node-a", "job-a", "job-uid", `{"version":1,"rank":0,"node_name":"node-a"}`, time.Unix(100, 0))
 	if err != nil {
-		t.Fatalf("BuildEventFromReport() error = %v", err)
+		t.Fatalf("BuildPreflightReport() error = %v", err)
 	}
+	event := ObservationEvent(report)
 	if event.ResourceType != events.Node {
 		t.Fatalf("event.ResourceType = %s, want %s", event.ResourceType, events.Node)
 	}
 	if event.Name != "node-a" {
 		t.Fatalf("event.Name = %q, want %q", event.Name, "node-a")
 	}
-	if _, ok := event.Annotations[constants.PreflightNamespaceAnnotation]; ok {
-		t.Fatalf("preflight annotation = %q, want missing", event.Annotations[constants.PreflightNamespaceAnnotation])
-	}
 	if event.Annotations[constants.PreflightWorkloadAnnotation] != "job-a" {
 		t.Fatalf("workload annotation = %q, want %q", event.Annotations[constants.PreflightWorkloadAnnotation], "job-a")
 	}
-	if event.Annotations[constants.PreflightDedupKeyAnnotation] == "" {
-		t.Fatal("dedup annotation = empty, want non-empty")
-	}
-	if !strings.HasPrefix(event.Annotations[constants.PreflightDedupKeyAnnotation], "default/job-a/node-a/0/") {
-		t.Fatalf("dedup annotation = %q, want prefix %q", event.Annotations[constants.PreflightDedupKeyAnnotation], "default/job-a/node-a/0/")
+	if event.Message != "preflight report received for workload job-a on node node-a" {
+		t.Fatalf("event.Message = %q, want human-readable observation", event.Message)
 	}
 	if event.EventType != 0 {
 		t.Fatalf("event.EventType = %d, want 0", event.EventType)
@@ -190,7 +185,7 @@ func TestReportToEvent(t *testing.T) {
 func TestReportToEventRejectsEmptyWorkload(t *testing.T) {
 	t.Parallel()
 
-	_, err := BuildEventFromReport("default", "node-a", "", `{"version":1,"rank":0,"node_name":"node-a"}`)
+	_, err := BuildPreflightReport("default", "node-a", "", "job-uid", `{"version":1,"rank":0,"node_name":"node-a"}`, time.Unix(100, 0))
 	if err == nil {
 		t.Fatal("ReportToEvent() error = nil, want non-nil")
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/baizeai/kcover/pkg/runner"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	coordv1 "k8s.io/client-go/kubernetes/typed/coordination/v1"
 	"k8s.io/client-go/tools/leaderelection"
@@ -78,20 +79,25 @@ func lock(hostName string) *resourcelock.LeaseLock {
 func makeElectionCallback(reportCollectionTimeout, sweepInterval time.Duration) (func(ctx context.Context), func()) {
 	cfg := kube.GetK8sConfigConfigWithFile("", "")
 	client := kubernetes.NewForConfigOrDie(cfg)
+	dynamicClient := dynamic.NewForConfigOrDie(cfg)
 
 	var (
 		recov    runner.Runner
 		detector runner.Runner
 		bridge   events.Bridge
+		reports  runner.Runner
 	)
 
 	return func(context.Context) {
 			// 当前实例成为 leader 时，开始执行 controller 逻辑
 			var err error
 			bridge = events.NewKubeEventBridge(client)
+			reportTransport := preflight.NewKubeReportStream(dynamicClient)
+			reports = reportTransport
 			recov = recovery.NewController(
 				client,
 				bridge,
+				reportTransport,
 				reportCollectionTimeout,
 				sweepInterval,
 			)
@@ -108,11 +114,15 @@ func makeElectionCallback(reportCollectionTimeout, sweepInterval time.Duration) 
 			if err := bridge.Start(); err != nil {
 				panic(err)
 			}
+			if err := reports.Start(); err != nil {
+				panic(err)
+			}
 
 			klog.InfoS("kcover started")
 		},
 		func() {
 			detector.Stop()
+			reports.Stop()
 			bridge.Stop()
 			recov.Stop()
 			klog.InfoS("kcover stopped")
