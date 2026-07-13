@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	kcoverconfig "github.com/baizeai/kcover/cmd/agent/config"
+	kcoverconfig "github.com/baizeai/kcover/pkg/agentconfig"
 	"k8s.io/client-go/kubernetes/fake"
 )
 

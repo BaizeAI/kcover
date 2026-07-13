@@ -166,7 +166,7 @@ func TestStartStopClosesEventChannel(t *testing.T) {
 	t.Parallel()
 
 	bridge := NewKubeEventBridge(fake.NewSimpleClientset()).(*kubeEventBridge)
-	if err := bridge.Start(); err != nil {
+	if err := bridge.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 

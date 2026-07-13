@@ -70,8 +70,8 @@ func NewForNode(cli kubernetes.Interface, sink events.Sink, logName, nodeName st
 	return obs, nil
 }
 
-func (o *observer) Start() error {
-	ctx, cancel := context.WithCancel(context.Background())
+func (o *observer) Start(parent context.Context) error {
+	ctx, cancel := context.WithCancel(parent)
 	o.cancel = cancel
 	o.doneCh = make(chan struct{})
 

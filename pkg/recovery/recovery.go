@@ -288,11 +288,11 @@ func (r *RecoveryController) onEvent(ctx context.Context, e events.Event) {
 	}
 }
 
-func (r *RecoveryController) Start() error {
+func (r *RecoveryController) Start(parent context.Context) error {
 	if r.eventStream == nil {
 		return fmt.Errorf("event stream cannot be nil")
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parent)
 	r.cancel = cancel
 	r.doneCh = make(chan struct{})
 

@@ -1,9 +1,10 @@
 package node
 
 import (
+	"context"
 	"testing"
 
-	kcoverconfig "github.com/baizeai/kcover/cmd/agent/config"
+	kcoverconfig "github.com/baizeai/kcover/pkg/agentconfig"
 	"github.com/baizeai/kcover/pkg/events"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -42,7 +43,7 @@ func TestNewDetectorStartsDetector(t *testing.T) {
 		t.Fatalf("NewDetector returned error: %v", err)
 	}
 
-	if err := detector.Start(); err != nil {
+	if err := detector.Start(context.Background()); err != nil {
 		t.Fatalf("detector.Start() error = %v", err)
 	}
 	detector.Stop()

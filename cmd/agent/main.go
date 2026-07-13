@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/baizeai/kcover/cmd/agent/config"
+	config "github.com/baizeai/kcover/pkg/agentconfig"
 	"github.com/baizeai/kcover/pkg/detector/node"
 	"github.com/baizeai/kcover/pkg/events"
 	"github.com/baizeai/kcover/pkg/kube"
@@ -69,7 +69,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("create preflight report publisher: %w", err)
 	}
-	if err := publisher.Start(); err != nil {
+	if err := publisher.Start(ctx); err != nil {
 		return fmt.Errorf("start preflight report publisher: %w", err)
 	}
 	defer publisher.Stop()
@@ -80,7 +80,7 @@ func run() error {
 	}
 	defer detector.Stop()
 
-	if err := detector.Start(); err != nil {
+	if err := detector.Start(ctx); err != nil {
 		return fmt.Errorf("start node detector: %w", err)
 	}
 
@@ -90,7 +90,7 @@ func run() error {
 	}
 	defer observer.Stop()
 
-	if err := observer.Start(); err != nil {
+	if err := observer.Start(ctx); err != nil {
 		return fmt.Errorf("start preflight pod observer: %w", err)
 	}
 

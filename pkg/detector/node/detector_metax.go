@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/baizeai/kcover/cmd/agent/config"
+	config "github.com/baizeai/kcover/pkg/agentconfig"
 	d "github.com/baizeai/kcover/pkg/detector"
 	detectorpkg "github.com/baizeai/kcover/pkg/detector"
 	"github.com/baizeai/kcover/pkg/events"
@@ -184,14 +184,14 @@ func nextCheckTime(now time.Time, schedule string) (time.Time, error) {
 	return next, nil
 }
 
-func (d *metaXDetector) Start() error {
+func (d *metaXDetector) Start(parent context.Context) error {
 	next, err := nextCheckTime(time.Now(), d.config.Day2CheckTime)
 	if err != nil {
 		return err
 	}
 
 	d.doneCh = make(chan struct{})
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parent)
 	d.cancel = cancel
 
 	go func(ctx context.Context) {

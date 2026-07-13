@@ -227,7 +227,7 @@ func TestStopReturnsWithoutEventStreamClose(t *testing.T) {
 
 	stream := blockingEventStream{ch: make(chan events.Event)}
 	controller := NewController(fake.NewSimpleClientset(), stream, nil, 0, time.Hour)
-	if err := controller.Start(); err != nil {
+	if err := controller.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 
@@ -256,7 +256,7 @@ func TestControllerConsumesPreflightReportStream(t *testing.T) {
 	reports <- preflightReport("default", "node-a", "job-a", reportText("job-a", 2, 0, "node-a"))
 	reports <- preflightReport("default", "node-b", "job-a", reportText("job-a", 2, 1, "node-b"))
 	controller := NewController(client, eventStream, blockingReportStream{ch: reports}, 0, time.Hour)
-	if err := controller.Start(); err != nil {
+	if err := controller.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	defer controller.Stop()

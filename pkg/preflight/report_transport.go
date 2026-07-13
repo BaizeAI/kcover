@@ -123,12 +123,12 @@ func NewKubeReportStream(client dynamic.Interface) *kubeReportStream {
 	}
 }
 
-func (s *kubeReportStream) Start() error {
+func (s *kubeReportStream) Start(parent context.Context) error {
 	if s.client == nil {
 		return fmt.Errorf("preflight report client is nil")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parent)
 	s.cancel = cancel
 	s.doneCh = make(chan struct{})
 	factory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(s.client, 0, metav1.NamespaceAll, nil)

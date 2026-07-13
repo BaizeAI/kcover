@@ -88,7 +88,7 @@ func makeElectionCallback(reportCollectionTimeout, sweepInterval time.Duration) 
 		reports  runner.Runner
 	)
 
-	return func(context.Context) {
+	return func(ctx context.Context) {
 			// 当前实例成为 leader 时，开始执行 controller 逻辑
 			var err error
 			bridge = events.NewKubeEventBridge(client)
@@ -105,16 +105,16 @@ func makeElectionCallback(reportCollectionTimeout, sweepInterval time.Duration) 
 			if err != nil {
 				panic(err)
 			}
-			if err := recov.Start(); err != nil {
+			if err := recov.Start(ctx); err != nil {
 				panic(err)
 			}
-			if err := detector.Start(); err != nil {
+			if err := detector.Start(ctx); err != nil {
 				panic(err)
 			}
-			if err := bridge.Start(); err != nil {
+			if err := bridge.Start(ctx); err != nil {
 				panic(err)
 			}
-			if err := reports.Start(); err != nil {
+			if err := reports.Start(ctx); err != nil {
 				panic(err)
 			}
 

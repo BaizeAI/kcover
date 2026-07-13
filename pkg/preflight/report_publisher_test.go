@@ -1,6 +1,7 @@
 package preflight
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -58,7 +59,7 @@ func TestReportPublisherRetriesUntilReportIsCreated(t *testing.T) {
 		eventSink,
 		workqueue.NewTypedItemExponentialFailureRateLimiter[string](time.Millisecond, 5*time.Millisecond),
 	)
-	if err := publisher.Start(); err != nil {
+	if err := publisher.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	defer publisher.Stop()
@@ -92,7 +93,7 @@ func TestReportPublisherDropsPermanentError(t *testing.T) {
 		eventSink,
 		workqueue.NewTypedItemExponentialFailureRateLimiter[string](time.Millisecond, 5*time.Millisecond),
 	)
-	if err := publisher.Start(); err != nil {
+	if err := publisher.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	defer publisher.Stop()
@@ -123,7 +124,7 @@ func TestReportPublisherRetriesAuthorizationError(t *testing.T) {
 		eventSink,
 		workqueue.NewTypedItemExponentialFailureRateLimiter[string](time.Millisecond, 5*time.Millisecond),
 	)
-	if err := publisher.Start(); err != nil {
+	if err := publisher.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	defer publisher.Stop()
@@ -163,7 +164,7 @@ func TestReportPublisherDoesNotObserveExistingReport(t *testing.T) {
 		eventSink,
 		workqueue.NewTypedItemExponentialFailureRateLimiter[string](time.Millisecond, 5*time.Millisecond),
 	)
-	if err := publisher.Start(); err != nil {
+	if err := publisher.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	defer publisher.Stop()
@@ -191,7 +192,7 @@ func TestReportPublisherRunsMultipleReportWorkers(t *testing.T) {
 		recordingEventSink{events: make(chan events.Event, 1)},
 		workqueue.NewTypedItemExponentialFailureRateLimiter[string](time.Millisecond, 5*time.Millisecond),
 	)
-	if err := publisher.Start(); err != nil {
+	if err := publisher.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	defer publisher.Stop()
@@ -223,7 +224,7 @@ func TestReportPublisherEventDoesNotBlockReports(t *testing.T) {
 		eventSink,
 		workqueue.NewTypedItemExponentialFailureRateLimiter[string](time.Millisecond, 5*time.Millisecond),
 	)
-	if err := publisher.Start(); err != nil {
+	if err := publisher.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	defer publisher.Stop()
@@ -256,10 +257,10 @@ func TestReportPublisherLifecycleIsIdempotent(t *testing.T) {
 	if err := publisher.SubmitReport(publisherTestReport(t)); err == nil {
 		t.Fatal("SubmitReport() before Start error = nil, want non-nil")
 	}
-	if err := publisher.Start(); err != nil {
+	if err := publisher.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	if err := publisher.Start(); err != nil {
+	if err := publisher.Start(context.Background()); err != nil {
 		t.Fatalf("second Start() error = %v, want nil", err)
 	}
 	publisher.Stop()
@@ -267,7 +268,7 @@ func TestReportPublisherLifecycleIsIdempotent(t *testing.T) {
 	if err := publisher.SubmitReport(publisherTestReport(t)); err == nil {
 		t.Fatal("SubmitReport() after Stop error = nil, want non-nil")
 	}
-	if err := publisher.Start(); err == nil {
+	if err := publisher.Start(context.Background()); err == nil {
 		t.Fatal("Start() after Stop error = nil, want non-nil")
 	}
 }
@@ -281,6 +282,28 @@ func TestReportPublisherStopBeforeStartReturns(t *testing.T) {
 		workqueue.NewTypedItemExponentialFailureRateLimiter[string](time.Millisecond, 5*time.Millisecond),
 	)
 	publisher.Stop()
+	publisher.Stop()
+}
+
+func TestReportPublisherStopsAfterParentContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	publisher := newReportPublisher(
+		&flakyReportSink{},
+		recordingEventSink{events: make(chan events.Event, 1)},
+		workqueue.NewTypedItemExponentialFailureRateLimiter[string](time.Millisecond, 5*time.Millisecond),
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := publisher.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	cancel()
+
+	select {
+	case <-publisher.doneCh:
+	case <-time.After(time.Second):
+		t.Fatal("publisher did not stop after parent context cancellation")
+	}
 	publisher.Stop()
 }
 

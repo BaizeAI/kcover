@@ -1,6 +1,6 @@
 //go:build metax
 
-package config
+package agentconfig
 
 import (
 	"fmt"

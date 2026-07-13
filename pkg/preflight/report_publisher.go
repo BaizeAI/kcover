@@ -1,6 +1,7 @@
 package preflight
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -41,6 +42,7 @@ type reportPublisher struct {
 
 	mu       sync.Mutex
 	state    publisherState
+	cancel   context.CancelFunc
 	pending  map[string]*kcoverv1alpha1.PreflightReport
 	reportWG sync.WaitGroup
 	eventWG  sync.WaitGroup
@@ -92,7 +94,7 @@ func (p *reportPublisher) SubmitReport(report *kcoverv1alpha1.PreflightReport) e
 	return nil
 }
 
-func (p *reportPublisher) Start() error {
+func (p *reportPublisher) Start(parent context.Context) error {
 	p.mu.Lock()
 	switch p.state {
 	case publisherRunning:
@@ -102,6 +104,8 @@ func (p *reportPublisher) Start() error {
 		p.mu.Unlock()
 		return fmt.Errorf("preflight report publisher is stopped")
 	}
+	ctx, cancel := context.WithCancel(parent)
+	p.cancel = cancel
 	p.state = publisherRunning
 	p.reportWG.Add(reportWorkerCount)
 	p.eventWG.Add(1)
@@ -111,6 +115,10 @@ func (p *reportPublisher) Start() error {
 		go p.runReportWorker()
 	}
 	go p.runEventWorker()
+	go func() {
+		<-ctx.Done()
+		p.queue.ShutDown()
+	}()
 	go func() {
 		p.reportWG.Wait()
 		close(p.eventCh)
@@ -204,9 +212,13 @@ func (p *reportPublisher) Stop() {
 		return
 	}
 	p.state = publisherStopped
+	cancel := p.cancel
 	doneCh := p.doneCh
 	p.mu.Unlock()
 
+	if cancel != nil {
+		cancel()
+	}
 	p.queue.ShutDown()
 	<-doneCh
 	klog.InfoS("preflight report publisher stopped")

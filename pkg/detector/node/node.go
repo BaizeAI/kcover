@@ -1,9 +1,10 @@
 package node
 
 import (
+	"context"
 	"fmt"
 
-	"github.com/baizeai/kcover/cmd/agent/config"
+	config "github.com/baizeai/kcover/pkg/agentconfig"
 	detectorpkg "github.com/baizeai/kcover/pkg/detector"
 	"github.com/baizeai/kcover/pkg/events"
 	"github.com/baizeai/kcover/pkg/runner"
@@ -35,8 +36,8 @@ func NewDetector(nodeName string, cfg config.Agent, client kubernetes.Interface,
 	}, nil
 }
 
-func (d *detector) Start() error {
-	if err := d.detector.Start(); err != nil {
+func (d *detector) Start(ctx context.Context) error {
+	if err := d.detector.Start(ctx); err != nil {
 		return err
 	}
 	klog.InfoS("detector started", "detector", d.detector)

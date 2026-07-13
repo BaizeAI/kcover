@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	kcoverconfig "github.com/baizeai/kcover/cmd/agent/config"
+	kcoverconfig "github.com/baizeai/kcover/pkg/agentconfig"
 	"github.com/baizeai/kcover/pkg/events"
 
 	corev1 "k8s.io/api/core/v1"
@@ -250,7 +250,7 @@ func TestDay2CheckEmitsEventWhenCapabilityEnabledAndCheckFails(t *testing.T) {
 
 	select {
 	case <-done:
-	default:
+	case <-time.After(time.Second):
 		t.Fatal("day2Check() did not return after emitting event")
 	}
 	instance.Stop()
@@ -282,7 +282,7 @@ func TestStopClosesEventChannelAfterStartGoroutineExits(t *testing.T) {
 	t.Parallel()
 
 	instance := newMetaXDetector(kcoverconfig.MetaX{NodeName: "node-a", Day2CheckTime: defaultCheckTime}, 5, fake.NewSimpleClientset())
-	if err := instance.Start(); err != nil {
+	if err := instance.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 
@@ -312,7 +312,7 @@ func TestStartReturnsErrorForInvalidDay2Schedule(t *testing.T) {
 	t.Parallel()
 
 	instance := newMetaXDetector(kcoverconfig.MetaX{NodeName: "node-a", Day2CheckTime: "invalid"}, 5, fake.NewSimpleClientset())
-	if err := instance.Start(); err == nil {
+	if err := instance.Start(context.Background()); err == nil {
 		t.Fatal("Start() error = nil, want error for invalid day2 schedule")
 	}
 }

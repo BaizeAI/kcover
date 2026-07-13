@@ -100,7 +100,7 @@ func TestKubeReportStreamListsExistingReport(t *testing.T) {
 	}
 
 	stream := NewKubeReportStream(client)
-	if err := stream.Start(); err != nil {
+	if err := stream.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	defer stream.Stop()
@@ -128,7 +128,7 @@ func TestKubeReportStreamFailsWhenInitialListDoesNotSync(t *testing.T) {
 	stream := NewKubeReportStream(client)
 	stream.syncTimeout = 50 * time.Millisecond
 
-	if err := stream.Start(); err == nil {
+	if err := stream.Start(context.Background()); err == nil {
 		t.Fatal("Start() error = nil when informer cannot sync")
 	}
 	stream.Stop()

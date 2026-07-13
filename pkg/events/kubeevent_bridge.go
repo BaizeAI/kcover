@@ -49,8 +49,8 @@ func NewKubeEventBridge(cli kubernetes.Interface) Bridge {
 	}
 }
 
-func (bridge *kubeEventBridge) Start() error {
-	ctx, cancel := context.WithCancel(context.Background())
+func (bridge *kubeEventBridge) Start(parent context.Context) error {
+	ctx, cancel := context.WithCancel(parent)
 	bridge.cancel = cancel
 
 	factory := informers.NewSharedInformerFactory(bridge.client, 0)
@@ -69,6 +69,10 @@ func (bridge *kubeEventBridge) Start() error {
 
 	go informer.Run(ctx.Done())
 	go bridge.runQueueForwarder(ctx)
+	go func() {
+		<-ctx.Done()
+		bridge.queue.ShutDown()
+	}()
 	klog.InfoS("kube event bridge started")
 	return nil
 }
