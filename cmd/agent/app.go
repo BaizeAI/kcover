@@ -15,8 +15,7 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-// agentApp wires the collector, publisher, and node detector together and owns
-// their ordered startup, rollback, and shutdown.
+// agentApp owns the agent's long-running components and their lifecycle.
 type agentApp struct {
 	reportPublisher runner.Runner
 	nodeDetector    runner.Runner
@@ -24,29 +23,29 @@ type agentApp struct {
 }
 
 func newAgentApp(k8sConfig *rest.Config, agentConfig config.Agent, nodeName string) (*agentApp, error) {
-	kubeClient, err := kubernetes.NewForConfig(k8sConfig)
+	kubeCli, err := kubernetes.NewForConfig(k8sConfig)
 	if err != nil {
 		return nil, fmt.Errorf("create Kubernetes client: %w", err)
 	}
 
-	dynamicClient, err := dynamic.NewForConfig(k8sConfig)
+	dynCli, err := dynamic.NewForConfig(k8sConfig)
 	if err != nil {
 		return nil, fmt.Errorf("create Kubernetes dynamic client: %w", err)
 	}
 
-	eventSink := events.NewKubeEventSink(kubeClient)
-	reportSink := preflight.NewKubeReportSink(dynamicClient)
+	eventSink := events.NewKubeEventSink(kubeCli)
+	reportSink := preflight.NewKubeReportSink(dynCli)
 	reportPublisher, err := preflight.NewReportPublisher(reportSink, eventSink)
 	if err != nil {
 		return nil, fmt.Errorf("create preflight report publisher: %w", err)
 	}
 
-	nodeDetector, err := node.NewDetector(nodeName, agentConfig, kubeClient, eventSink)
+	nodeDetector, err := node.NewDetector(nodeName, agentConfig, kubeCli, eventSink)
 	if err != nil {
 		return nil, fmt.Errorf("create node detector: %w", err)
 	}
 
-	reportCollector, err := newReportCollector(kubeClient, eventSink, reportPublisher, nodeName)
+	reportCol, err := newReportCollector(kubeCli, eventSink, reportPublisher, nodeName)
 	if err != nil {
 		return nil, fmt.Errorf("create report collector: %w", err)
 	}
@@ -54,7 +53,7 @@ func newAgentApp(k8sConfig *rest.Config, agentConfig config.Agent, nodeName stri
 	return &agentApp{
 		reportPublisher: reportPublisher,
 		nodeDetector:    nodeDetector,
-		reportCollector: reportCollector,
+		reportCollector: reportCol,
 	}, nil
 }
 
