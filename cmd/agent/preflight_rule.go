@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	kcoverv1alpha1 "github.com/baizeai/kcover/pkg/apis/kcover/v1alpha1"
 	"github.com/baizeai/kcover/pkg/constants"
 	"github.com/baizeai/kcover/pkg/events"
 	"github.com/baizeai/kcover/pkg/podobserver"
@@ -22,28 +23,38 @@ import (
 const preflightReportDir = "/var/lib/kcover/preflight"
 const preflightInitContainerName = "preflight"
 
-type preflightRule struct {
-	baseDir   string
-	publisher preflight.ReportSubmitter
+// reportSubmitter is the collector's output port. Submit only means that the
+// report was accepted for delivery; persistence is the publisher's concern.
+type reportSubmitter interface {
+	Submit(*kcoverv1alpha1.PreflightReport) error
 }
 
-func (preflightRule) HandleInitialList() bool {
+// preflightRule recognizes completed preflight Pods, loads their node-local
+// report files, builds PreflightReport resources, and submits them for delivery.
+type preflightRule struct {
+	baseDir string
+	reports reportSubmitter
+}
+
+func (preflightRule) ShouldHandleInitialList() bool {
 	return true
 }
 
-func newPreflightObserver(cli kubernetes.Interface, eventSink events.Sink, publisher preflight.ReportSubmitter, nodeName string) (runner.Runner, error) {
-	if publisher == nil {
-		return nil, fmt.Errorf("preflight report publisher cannot be nil")
+// newReportCollector creates the Pod-backed component that collects reports
+// produced on this node. It delegates reliable delivery to reportSubmitter.
+func newReportCollector(cli kubernetes.Interface, eventSink events.Sink, reports reportSubmitter, nodeName string) (runner.Runner, error) {
+	if reports == nil {
+		return nil, fmt.Errorf("preflight report submitter cannot be nil")
 	}
-	observer, err := podobserver.NewForNode(cli, eventSink, "preflight pod observer", nodeName, preflightRule{
-		baseDir:   preflightReportDir,
-		publisher: publisher,
+	collector, err := podobserver.NewForNode(cli, eventSink, "report collector", nodeName, preflightRule{
+		baseDir: preflightReportDir,
+		reports: reports,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("create preflight pod observer: %w", err)
+		return nil, fmt.Errorf("create report collector: %w", err)
 	}
 
-	return observer, nil
+	return collector, nil
 }
 
 func (r preflightRule) OnAdd(pod *corev1.Pod) []events.Event {
@@ -87,17 +98,18 @@ func (r preflightRule) reconcile(pod *corev1.Pod) []events.Event {
 		return nil
 	}
 
-	report, err := preflight.BuildPreflightReport(pod.Namespace, nodeName, workloadName, workloadUID, reportText, observedAt, metav1.OwnerReference{
+	owner := metav1.OwnerReference{
 		APIVersion: "v1",
 		Kind:       "Pod",
 		Name:       pod.Name,
 		UID:        pod.UID,
-	})
+	}
+	report, err := preflight.BuildPreflightReport(pod.Namespace, nodeName, workloadName, workloadUID, reportText, observedAt, owner)
 	if err != nil {
 		klog.ErrorS(err, "failed to build PreflightReport", "namespace", pod.Namespace, "pod", pod.Name, "report", reportName)
 		return nil
 	}
-	if err := r.publisher.SubmitReport(report); err != nil {
+	if err := r.reports.Submit(report); err != nil {
 		klog.ErrorS(err, "failed to submit PreflightReport", "namespace", report.Namespace, "name", report.Name, "pod", pod.Name, "node", report.Spec.NodeName, "workload", workloadName)
 		return nil
 	}

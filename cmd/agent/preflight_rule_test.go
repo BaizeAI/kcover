@@ -22,18 +22,18 @@ func (agentStubSink) RecordEvent(events.Event) error {
 	return nil
 }
 
-type agentStubReportPublisher struct{}
+type agentStubReportSubmitter struct{}
 
-func (agentStubReportPublisher) SubmitReport(*kcoverv1alpha1.PreflightReport) error {
+func (agentStubReportSubmitter) Submit(*kcoverv1alpha1.PreflightReport) error {
 	return nil
 }
 
-type recordingReportPublisher struct {
+type recordingReportSubmitter struct {
 	reports []*kcoverv1alpha1.PreflightReport
 	names   map[string]struct{}
 }
 
-func (s *recordingReportPublisher) SubmitReport(report *kcoverv1alpha1.PreflightReport) error {
+func (s *recordingReportSubmitter) Submit(report *kcoverv1alpha1.PreflightReport) error {
 	if s.names == nil {
 		s.names = make(map[string]struct{})
 	}
@@ -46,15 +46,15 @@ func (s *recordingReportPublisher) SubmitReport(report *kcoverv1alpha1.Preflight
 	return nil
 }
 
-func TestNewPreflightObserverReturnsObserver(t *testing.T) {
+func TestNewReportCollectorReturnsRunner(t *testing.T) {
 	t.Parallel()
 
-	observer, err := newPreflightObserver(fake.NewSimpleClientset(), agentStubSink{}, agentStubReportPublisher{}, "node-a")
+	collector, err := newReportCollector(fake.NewSimpleClientset(), agentStubSink{}, agentStubReportSubmitter{}, "node-a")
 	if err != nil {
-		t.Fatalf("newPreflightObserver() error = %v", err)
+		t.Fatalf("newReportCollector() error = %v", err)
 	}
-	if observer == nil {
-		t.Fatal("newPreflightObserver() = nil, want observer")
+	if collector == nil {
+		t.Fatal("newReportCollector() = nil, want runner")
 	}
 }
 
@@ -99,22 +99,22 @@ func TestPreflightRuleSubmitsReportIdempotently(t *testing.T) {
 		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0, FinishedAt: metav1.NewTime(time.Unix(100, 0))}},
 	}}
 
-	publisher := &recordingReportPublisher{}
-	rule := preflightRule{baseDir: baseDir, publisher: publisher}
+	submitter := &recordingReportSubmitter{}
+	rule := preflightRule{baseDir: baseDir, reports: submitter}
 	observations := rule.OnUpdate(oldPod, newPod)
-	if len(publisher.reports) != 1 {
-		t.Fatalf("submitted reports = %d, want 1", len(publisher.reports))
+	if len(submitter.reports) != 1 {
+		t.Fatalf("submitted reports = %d, want 1", len(submitter.reports))
 	}
 	if len(observations) != 0 {
 		t.Fatalf("observation events returned by rule = %d, want 0", len(observations))
 	}
-	if len(publisher.reports[0].OwnerReferences) != 1 || publisher.reports[0].OwnerReferences[0].UID != newPod.UID {
-		t.Fatalf("report ownerReferences = %v, want source Pod", publisher.reports[0].OwnerReferences)
+	if len(submitter.reports[0].OwnerReferences) != 1 || submitter.reports[0].OwnerReferences[0].UID != newPod.UID {
+		t.Fatalf("report ownerReferences = %v, want source Pod", submitter.reports[0].OwnerReferences)
 	}
 
 	observations = rule.OnAdd(newPod)
-	if len(observations) != 0 || len(publisher.reports) != 1 {
-		t.Fatalf("initial-list reconciliation = %d observations, %d reports; want 0 observations and one idempotent submission", len(observations), len(publisher.reports))
+	if len(observations) != 0 || len(submitter.reports) != 1 {
+		t.Fatalf("initial-list reconciliation = %d observations, %d reports; want 0 observations and one idempotent submit", len(observations), len(submitter.reports))
 	}
 }
 
@@ -166,8 +166,8 @@ func TestShouldHandlePreflightPodUpdateRequiresLabel(t *testing.T) {
 func TestPreflightRuleOnAddRequiresLabel(t *testing.T) {
 	t.Parallel()
 
-	publisher := &recordingReportPublisher{}
-	rule := preflightRule{publisher: publisher}
+	submitter := &recordingReportSubmitter{}
+	rule := preflightRule{reports: submitter}
 	pod := &corev1.Pod{
 		Status: corev1.PodStatus{InitContainerStatuses: []corev1.ContainerStatus{{
 			Name:  preflightInitContainerName,
@@ -176,8 +176,8 @@ func TestPreflightRuleOnAddRequiresLabel(t *testing.T) {
 	}
 
 	rule.OnAdd(pod)
-	if len(publisher.reports) != 0 {
-		t.Fatalf("submitted reports for unlabeled initial Pod = %d, want 0", len(publisher.reports))
+	if len(submitter.reports) != 0 {
+		t.Fatalf("submitted reports for unlabeled initial Pod = %d, want 0", len(submitter.reports))
 	}
 }
 

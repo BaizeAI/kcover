@@ -10,6 +10,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func TestContainerErrorRuleHandlesInitialList(t *testing.T) {
+	t.Parallel()
+
+	if !((containerErrorRule{}).ShouldHandleInitialList()) {
+		t.Fatal("containerErrorRule.ShouldHandleInitialList() = false, want true")
+	}
+}
+
 func TestShouldCheckPodUpdate(t *testing.T) {
 	t.Parallel()
 

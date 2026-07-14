@@ -56,7 +56,8 @@ func TestKubeReportSinkCreatesImmutablePreflightReport(t *testing.T) {
 
 	client := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme())
 	sink := NewKubeReportSink(client)
-	report, err := BuildPreflightReport("train-ns", "node-a", "job-a", "job-uid", transportTestPayload, time.Unix(100, 0))
+	owner := metav1.OwnerReference{APIVersion: "v1", Kind: "Pod", Name: "worker-0", UID: types.UID("pod-uid")}
+	report, err := BuildPreflightReport("train-ns", "node-a", "job-a", "job-uid", transportTestPayload, time.Unix(100, 0), owner)
 	if err != nil {
 		t.Fatalf("BuildPreflightReport() error = %v", err)
 	}
@@ -81,9 +82,12 @@ func TestKubeReportSinkCreatesImmutablePreflightReport(t *testing.T) {
 	if delivery.Spec.WorkloadName != "job-a" || delivery.Spec.NodeName != "node-a" || delivery.Spec.Report != transportTestPayload {
 		t.Fatalf("stored delivery = %+v, want original report", delivery)
 	}
+	if len(delivery.OwnerReferences) != 1 || delivery.OwnerReferences[0].UID != owner.UID {
+		t.Fatalf("stored ownerReferences = %v, want source Pod", delivery.OwnerReferences)
+	}
 }
 
-func TestKubeReportStreamListsExistingReport(t *testing.T) {
+func TestKubeReportWatcherListsExistingReport(t *testing.T) {
 	t.Parallel()
 
 	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
@@ -99,23 +103,23 @@ func TestKubeReportStreamListsExistingReport(t *testing.T) {
 		t.Fatalf("WriteReport() error = %v", err)
 	}
 
-	stream := NewKubeReportStream(client)
-	if err := stream.Start(context.Background()); err != nil {
+	watcher := NewKubeReportWatcher(client)
+	if err := watcher.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	defer stream.Stop()
+	defer watcher.Stop()
 
 	select {
-	case got := <-stream.Reports():
+	case got := <-watcher.Reports():
 		if got.Name != report.Name || got.Spec.Report != report.Spec.Report {
-			t.Fatalf("stream report = %+v, want %+v", got, report)
+			t.Fatalf("watched report = %+v, want %+v", got, report)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("existing PreflightReport was not listed")
 	}
 }
 
-func TestKubeReportStreamFailsWhenInitialListDoesNotSync(t *testing.T) {
+func TestKubeReportWatcherFailsWhenInitialListDoesNotSync(t *testing.T) {
 	t.Parallel()
 
 	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
@@ -125,13 +129,13 @@ func TestKubeReportStreamFailsWhenInitialListDoesNotSync(t *testing.T) {
 	client.PrependReactor("list", "preflightreports", func(clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, errors.New("API unavailable")
 	})
-	stream := NewKubeReportStream(client)
-	stream.syncTimeout = 50 * time.Millisecond
+	watcher := NewKubeReportWatcher(client)
+	watcher.syncTimeout = 50 * time.Millisecond
 
-	if err := stream.Start(context.Background()); err == nil {
+	if err := watcher.Start(context.Background()); err == nil {
 		t.Fatal("Start() error = nil when informer cannot sync")
 	}
-	stream.Stop()
+	watcher.Stop()
 }
 
 func TestReportFromObjectRejectsInvalidPayloadAndMetadataMismatch(t *testing.T) {
@@ -166,5 +170,26 @@ func TestReportFromObjectRejectsInvalidPayloadAndMetadataMismatch(t *testing.T) 
 				t.Fatal("reportFromObject() error = nil, want invalid report rejected")
 			}
 		})
+	}
+}
+
+func TestReportFromObjectDefersBatchValidationToAggregator(t *testing.T) {
+	t.Parallel()
+
+	payload := `{"workload_size":2,"rank":0,"node_name":"node-a","node_ip":"10.0.0.1","gpu_check":1,"storage_check":1,"batches":[{"batch_idx":"invalid"}]}`
+	report, err := BuildPreflightReport("train-ns", "node-a", "job-a", "job-uid", payload, time.Unix(100, 0))
+	if err != nil {
+		t.Fatalf("BuildPreflightReport() error = %v", err)
+	}
+	content, err := runtime.DefaultUnstructuredConverter.ToUnstructured(report)
+	if err != nil {
+		t.Fatalf("ToUnstructured() error = %v", err)
+	}
+
+	if _, err := reportFromObject(&unstructured.Unstructured{Object: content}); err != nil {
+		t.Fatalf("reportFromObject() error = %v, want envelope-only validation", err)
+	}
+	if _, _, _, err := extractNodeReport(payload); err == nil {
+		t.Fatal("extractNodeReport() error = nil, want invalid batch rejected by aggregation validation")
 	}
 }

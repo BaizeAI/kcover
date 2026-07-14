@@ -12,9 +12,10 @@ Welcome to `kcover`, a Kubernetes solution designed to enhance the reliability a
 
 ### Prerequisites
 
-Ensure you have Kubernetes and Helm installed on your cluster. `kcover` is compatible with Kubernetes versions 1.19 and above.
+Ensure you have Kubernetes and Helm installed on your cluster. `kcover` requires
+Kubernetes 1.25 or newer because the `PreflightReport` CRD uses CEL validation.
 
-For local builds and tests, the repository now uses `go 1.25` with
+For local builds and tests, the repository uses `go 1.26` with
 `toolchain go1.26.5`. The toolchain bump is part of the current CVE
 remediation for the agent dependency stack.
 
@@ -24,8 +25,78 @@ Install `kcover` using Helm:
 
 ```shell
 helm repo add baizeai https://baizeai.github.io/charts
-helm install kcover baizeai/kcover --version 0.11.0 --namespace kcover-system --create-namespace
+helm install kcover baizeai/kcover --version 0.12.0 --namespace kcover-system --create-namespace
 ```
+
+### Upgrading from 0.10.x
+
+Version 0.11.0 does not render the 0.10.x values structure. Back up the values
+that were explicitly set on the existing release before starting the upgrade:
+
+```shell
+helm get values kcover \
+  --namespace kcover-system \
+  -o yaml > kcover-0.10-values.yaml
+```
+
+Helm installs files from a chart's `crds/` directory only during a new install,
+so apply the new CRD explicitly before upgrading the release:
+
+```shell
+helm show crds baizeai/kcover --version 0.11.0 | kubectl apply -f -
+```
+
+Version 0.11.0 splits the agent and controller ServiceAccounts and replaces the
+old vendor selector with `agent.flavor`. Create a new values file using the
+0.11.0 structure and migrate only settings that still apply:
+
+- Replace `agent.config.data.vendor: 1` with `agent.flavor: base`.
+- Replace `agent.config.data.vendor: 2` with `agent.flavor: metax`.
+- Do not copy the old top-level `serviceAccount`. The new chart creates separate
+  agent and controller ServiceAccounts by default.
+- Migrate intentional ServiceAccount names and annotations separately under
+  `agent.serviceAccount` and `controller.serviceAccount`.
+- Copy intentional custom image, resource, scheduling, and agent configuration
+  overrides to their corresponding 0.11.0 fields. Do not copy old default
+  security contexts or host volumes.
+
+For example, a MetaX installation with explicit ServiceAccount names can use
+the following `kcover-0.11-values.yaml`:
+
+```yaml
+agent:
+  flavor: metax
+  serviceAccount:
+    name: kcover-agent
+controller:
+  serviceAccount:
+    name: kcover-controller
+```
+
+Render the migrated configuration once before applying it:
+
+```shell
+helm upgrade kcover baizeai/kcover \
+  --version 0.11.0 \
+  --namespace kcover-system \
+  --reset-values \
+  -f kcover-0.11-values.yaml \
+  --dry-run
+```
+
+Then perform the upgrade with the same values and without `--dry-run`:
+
+```shell
+helm upgrade kcover baizeai/kcover \
+  --version 0.11.0 \
+  --namespace kcover-system \
+  --reset-values \
+  -f kcover-0.11-values.yaml
+```
+
+For a release with no custom settings, omit `-f`; add
+`--set agent.flavor=metax` when upgrading a MetaX deployment. Do not use
+`--reuse-values` for the 0.10.x to 0.11.0 upgrade.
 
 ### Configuration
 
@@ -81,33 +152,35 @@ MetaX-specific checks fall back to no-op.
 clock check is currently disabled and is therefore not exposed in the chart
 values.
 
-Install or update the default generic release:
+Install the default generic release, or reset an existing release to the new
+generic defaults:
 
 ```shell
 helm install kcover baizeai/kcover \
-  --version 0.11.0 \
+  --version 0.12.0 \
   --namespace kcover-system \
   --create-namespace
 
 helm upgrade kcover baizeai/kcover \
-  --version 0.11.0 \
+  --version 0.12.0 \
   --namespace kcover-system \
-  --reuse-values
+  --reset-values
 ```
 
-Install or update the MetaX release:
+Install the MetaX release, or reset an existing release to the new MetaX
+defaults:
 
 ```shell
 helm install kcover baizeai/kcover \
-  --version 0.11.0 \
+  --version 0.12.0 \
   --namespace kcover-system \
   --create-namespace \
   --set agent.flavor=metax
 
 helm upgrade kcover baizeai/kcover \
-  --version 0.11.0 \
+  --version 0.12.0 \
   --namespace kcover-system \
-  --reuse-values \
+  --reset-values \
   --set agent.flavor=metax
 ```
 
@@ -119,7 +192,7 @@ If your MetaX nodes require HCA checks, set the HCA IDs as chart values too:
 
 ```shell
 helm upgrade kcover baizeai/kcover \
-  --version 0.11.0 \
+  --version 0.12.0 \
   --namespace kcover-system \
   --reuse-values \
   --set agent.flavor=metax \
@@ -256,6 +329,6 @@ If you need to build manually, use:
 
 ```shell
 docker build -f docker/mx-smi.Dockerfile -t ghcr.io/baizeai/mx-smi:v0.2 .
-docker buildx build -f docker/agent.Dockerfile --platform linux/amd64,linux/arm64 -t ghcr.io/baizeai/kcover-agent:v0.11.0 .
-docker build -f docker/agent-metax.Dockerfile --build-arg MX_SMI_IMAGE=ghcr.io/baizeai/mx-smi:v0.2 -t ghcr.io/baizeai/kcover-agent-metax:v0.11.0 .
+docker buildx build -f docker/agent.Dockerfile --platform linux/amd64,linux/arm64 -t ghcr.io/baizeai/kcover-agent:v0.12.0 .
+docker build -f docker/agent-metax.Dockerfile --build-arg MX_SMI_IMAGE=ghcr.io/baizeai/mx-smi:v0.2 -t ghcr.io/baizeai/kcover-agent-metax:v0.12.0 .
 ```

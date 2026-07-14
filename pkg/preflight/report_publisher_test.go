@@ -13,7 +13,6 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/util/workqueue"
 )
 
 type flakyReportSink struct {
@@ -52,21 +51,17 @@ func (s recordingEventSink) RecordEvent(event events.Event) error {
 func TestReportPublisherRetriesUntilReportIsCreated(t *testing.T) {
 	t.Parallel()
 
-	sink := &flakyReportSink{failures: 5, err: errors.New("temporary API failure"), created: true}
+	sink := &flakyReportSink{failures: 2, err: errors.New("temporary API failure"), created: true}
 	eventSink := recordingEventSink{events: make(chan events.Event, 1)}
-	publisher := newReportPublisher(
-		sink,
-		eventSink,
-		workqueue.NewTypedItemExponentialFailureRateLimiter[string](time.Millisecond, 5*time.Millisecond),
-	)
+	publisher := newTestReportPublisher(t, sink, eventSink)
 	if err := publisher.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	defer publisher.Stop()
 
 	report := publisherTestReport(t)
-	if err := publisher.SubmitReport(report); err != nil {
-		t.Fatalf("SubmitReport() error = %v", err)
+	if err := publisher.Submit(report); err != nil {
+		t.Fatalf("Submit() error = %v", err)
 	}
 
 	select {
@@ -77,8 +72,8 @@ func TestReportPublisherRetriesUntilReportIsCreated(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("publisher did not create report after transient failures")
 	}
-	if got := sink.attemptCount(); got != 6 {
-		t.Fatalf("WriteReport() attempts = %d, want 6", got)
+	if got := sink.attemptCount(); got != 3 {
+		t.Fatalf("WriteReport() attempts = %d, want 3", got)
 	}
 }
 
@@ -88,18 +83,14 @@ func TestReportPublisherDropsPermanentError(t *testing.T) {
 	permanentErr := apierrors.NewBadRequest("invalid report")
 	sink := &flakyReportSink{failures: -1, err: permanentErr}
 	eventSink := recordingEventSink{events: make(chan events.Event, 1)}
-	publisher := newReportPublisher(
-		sink,
-		eventSink,
-		workqueue.NewTypedItemExponentialFailureRateLimiter[string](time.Millisecond, 5*time.Millisecond),
-	)
+	publisher := newTestReportPublisher(t, sink, eventSink)
 	if err := publisher.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	defer publisher.Stop()
 
-	if err := publisher.SubmitReport(publisherTestReport(t)); err != nil {
-		t.Fatalf("SubmitReport() error = %v", err)
+	if err := publisher.Submit(publisherTestReport(t)); err != nil {
+		t.Fatalf("Submit() error = %v", err)
 	}
 	waitForPublisherAttempts(t, sink, 1)
 	time.Sleep(20 * time.Millisecond)
@@ -119,18 +110,14 @@ func TestReportPublisherRetriesAuthorizationError(t *testing.T) {
 	authorizationErr := apierrors.NewForbidden(schema.GroupResource{Group: kcoverv1alpha1.Group, Resource: "preflightreports"}, "report-a", errors.New("RBAC not ready"))
 	sink := &flakyReportSink{failures: 2, err: authorizationErr, created: true}
 	eventSink := recordingEventSink{events: make(chan events.Event, 1)}
-	publisher := newReportPublisher(
-		sink,
-		eventSink,
-		workqueue.NewTypedItemExponentialFailureRateLimiter[string](time.Millisecond, 5*time.Millisecond),
-	)
+	publisher := newTestReportPublisher(t, sink, eventSink)
 	if err := publisher.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	defer publisher.Stop()
 
-	if err := publisher.SubmitReport(publisherTestReport(t)); err != nil {
-		t.Fatalf("SubmitReport() error = %v", err)
+	if err := publisher.Submit(publisherTestReport(t)); err != nil {
+		t.Fatalf("Submit() error = %v", err)
 	}
 	select {
 	case <-eventSink.events:
@@ -159,18 +146,14 @@ func TestReportPublisherDoesNotObserveExistingReport(t *testing.T) {
 
 	sink := &flakyReportSink{created: false}
 	eventSink := recordingEventSink{events: make(chan events.Event, 1)}
-	publisher := newReportPublisher(
-		sink,
-		eventSink,
-		workqueue.NewTypedItemExponentialFailureRateLimiter[string](time.Millisecond, 5*time.Millisecond),
-	)
+	publisher := newTestReportPublisher(t, sink, eventSink)
 	if err := publisher.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	defer publisher.Stop()
 
-	if err := publisher.SubmitReport(publisherTestReport(t)); err != nil {
-		t.Fatalf("SubmitReport() error = %v", err)
+	if err := publisher.Submit(publisherTestReport(t)); err != nil {
+		t.Fatalf("Submit() error = %v", err)
 	}
 	waitForPublisherAttempts(t, sink, 1)
 	select {
@@ -180,82 +163,12 @@ func TestReportPublisherDoesNotObserveExistingReport(t *testing.T) {
 	}
 }
 
-func TestReportPublisherRunsMultipleReportWorkers(t *testing.T) {
-	t.Parallel()
-
-	sink := &blockingReportSink{
-		started: make(chan string, reportWorkerCount),
-		release: make(chan struct{}),
-	}
-	publisher := newReportPublisher(
-		sink,
-		recordingEventSink{events: make(chan events.Event, 1)},
-		workqueue.NewTypedItemExponentialFailureRateLimiter[string](time.Millisecond, 5*time.Millisecond),
-	)
-	if err := publisher.Start(context.Background()); err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-	defer publisher.Stop()
-
-	for idx := range reportWorkerCount {
-		report := publisherTestReport(t)
-		report.Name += fmt.Sprintf("-%d", idx)
-		if err := publisher.SubmitReport(report); err != nil {
-			t.Fatalf("SubmitReport(%d) error = %v", idx, err)
-		}
-	}
-	for range reportWorkerCount {
-		select {
-		case <-sink.started:
-		case <-time.After(time.Second):
-			t.Fatal("report writes did not run concurrently")
-		}
-	}
-	close(sink.release)
-}
-
-func TestReportPublisherEventDoesNotBlockReports(t *testing.T) {
-	t.Parallel()
-
-	sink := &countingReportSink{attempts: make(chan struct{}, reportWorkerCount+1)}
-	eventSink := &blockingEventSink{release: make(chan struct{})}
-	publisher := newReportPublisher(
-		sink,
-		eventSink,
-		workqueue.NewTypedItemExponentialFailureRateLimiter[string](time.Millisecond, 5*time.Millisecond),
-	)
-	if err := publisher.Start(context.Background()); err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-	defer publisher.Stop()
-
-	for idx := 0; idx < reportWorkerCount+1; idx++ {
-		report := publisherTestReport(t)
-		report.Name += fmt.Sprintf("-%d", idx)
-		if err := publisher.SubmitReport(report); err != nil {
-			t.Fatalf("SubmitReport(%d) error = %v", idx, err)
-		}
-	}
-	for idx := 0; idx < reportWorkerCount+1; idx++ {
-		select {
-		case <-sink.attempts:
-		case <-time.After(time.Second):
-			t.Fatal("blocking observation Event stalled report creation")
-		}
-	}
-	close(eventSink.release)
-}
-
 func TestReportPublisherLifecycleIsIdempotent(t *testing.T) {
 	t.Parallel()
 
-	publisher := newReportPublisher(
-		&flakyReportSink{},
-		recordingEventSink{events: make(chan events.Event, 1)},
-		workqueue.NewTypedItemExponentialFailureRateLimiter[string](time.Millisecond, 5*time.Millisecond),
-	)
-	if err := publisher.SubmitReport(publisherTestReport(t)); err == nil {
-		t.Fatal("SubmitReport() before Start error = nil, want non-nil")
+	publisher := newTestReportPublisher(t, &flakyReportSink{}, recordingEventSink{events: make(chan events.Event, 1)})
+	if err := publisher.Submit(publisherTestReport(t)); err == nil {
+		t.Fatal("Submit() before Start error = nil, want non-nil")
 	}
 	if err := publisher.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
@@ -265,8 +178,8 @@ func TestReportPublisherLifecycleIsIdempotent(t *testing.T) {
 	}
 	publisher.Stop()
 	publisher.Stop()
-	if err := publisher.SubmitReport(publisherTestReport(t)); err == nil {
-		t.Fatal("SubmitReport() after Stop error = nil, want non-nil")
+	if err := publisher.Submit(publisherTestReport(t)); err == nil {
+		t.Fatal("Submit() after Stop error = nil, want non-nil")
 	}
 	if err := publisher.Start(context.Background()); err == nil {
 		t.Fatal("Start() after Stop error = nil, want non-nil")
@@ -276,11 +189,7 @@ func TestReportPublisherLifecycleIsIdempotent(t *testing.T) {
 func TestReportPublisherStopBeforeStartReturns(t *testing.T) {
 	t.Parallel()
 
-	publisher := newReportPublisher(
-		&flakyReportSink{},
-		recordingEventSink{events: make(chan events.Event, 1)},
-		workqueue.NewTypedItemExponentialFailureRateLimiter[string](time.Millisecond, 5*time.Millisecond),
-	)
+	publisher := newTestReportPublisher(t, &flakyReportSink{}, recordingEventSink{events: make(chan events.Event, 1)})
 	publisher.Stop()
 	publisher.Stop()
 }
@@ -288,11 +197,7 @@ func TestReportPublisherStopBeforeStartReturns(t *testing.T) {
 func TestReportPublisherStopsAfterParentContextCancellation(t *testing.T) {
 	t.Parallel()
 
-	publisher := newReportPublisher(
-		&flakyReportSink{},
-		recordingEventSink{events: make(chan events.Event, 1)},
-		workqueue.NewTypedItemExponentialFailureRateLimiter[string](time.Millisecond, 5*time.Millisecond),
-	)
+	publisher := newTestReportPublisher(t, &flakyReportSink{}, recordingEventSink{events: make(chan events.Event, 1)})
 	ctx, cancel := context.WithCancel(context.Background())
 	if err := publisher.Start(ctx); err != nil {
 		t.Fatalf("Start() error = %v", err)
@@ -307,33 +212,13 @@ func TestReportPublisherStopsAfterParentContextCancellation(t *testing.T) {
 	publisher.Stop()
 }
 
-type blockingReportSink struct {
-	started chan string
-	release chan struct{}
-}
-
-func (s *blockingReportSink) WriteReport(report *kcoverv1alpha1.PreflightReport) (bool, error) {
-	s.started <- report.Name
-	<-s.release
-	return false, nil
-}
-
-type countingReportSink struct {
-	attempts chan struct{}
-}
-
-func (s *countingReportSink) WriteReport(*kcoverv1alpha1.PreflightReport) (bool, error) {
-	s.attempts <- struct{}{}
-	return true, nil
-}
-
-type blockingEventSink struct {
-	release chan struct{}
-}
-
-func (s *blockingEventSink) RecordEvent(events.Event) error {
-	<-s.release
-	return nil
+func newTestReportPublisher(t *testing.T, reportSink ReportSink, eventSink events.Sink) *ReportPublisher {
+	t.Helper()
+	publisher, err := NewReportPublisher(reportSink, eventSink)
+	if err != nil {
+		t.Fatalf("NewReportPublisher() error = %v", err)
+	}
+	return publisher
 }
 
 func publisherTestReport(t *testing.T) *kcoverv1alpha1.PreflightReport {

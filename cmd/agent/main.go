@@ -9,13 +9,8 @@ import (
 	"syscall"
 
 	config "github.com/baizeai/kcover/pkg/agentconfig"
-	"github.com/baizeai/kcover/pkg/detector/node"
-	"github.com/baizeai/kcover/pkg/events"
 	"github.com/baizeai/kcover/pkg/kube"
-	"github.com/baizeai/kcover/pkg/preflight"
 
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 )
 
@@ -54,45 +49,15 @@ func run() error {
 		return fmt.Errorf("load Kubernetes config: returned nil config")
 	}
 
-	client, err := kubernetes.NewForConfig(k8sConfig)
+	app, err := newAgentApp(k8sConfig, cfg, hostName)
 	if err != nil {
-		return fmt.Errorf("create kubernetes client: %w", err)
+		return err
 	}
 
-	sink := events.NewKubeEventSink(client)
-	dynamicClient, err := dynamic.NewForConfig(k8sConfig)
-	if err != nil {
-		return fmt.Errorf("create Kubernetes dynamic client: %w", err)
+	if err := app.Start(ctx); err != nil {
+		return err
 	}
-	reportSink := preflight.NewKubeReportSink(dynamicClient)
-	publisher, err := preflight.NewReportPublisher(reportSink, sink)
-	if err != nil {
-		return fmt.Errorf("create preflight report publisher: %w", err)
-	}
-	if err := publisher.Start(ctx); err != nil {
-		return fmt.Errorf("start preflight report publisher: %w", err)
-	}
-	defer publisher.Stop()
-
-	detector, err := node.NewDetector(hostName, cfg, client, sink)
-	if err != nil {
-		return fmt.Errorf("create node detector: %w", err)
-	}
-	defer detector.Stop()
-
-	if err := detector.Start(ctx); err != nil {
-		return fmt.Errorf("start node detector: %w", err)
-	}
-
-	observer, err := newPreflightObserver(client, sink, publisher, hostName)
-	if err != nil {
-		return fmt.Errorf("create preflight pod observer: %w", err)
-	}
-	defer observer.Stop()
-
-	if err := observer.Start(ctx); err != nil {
-		return fmt.Errorf("start preflight pod observer: %w", err)
-	}
+	defer app.Stop()
 
 	klog.InfoS("agent started")
 	<-ctx.Done()

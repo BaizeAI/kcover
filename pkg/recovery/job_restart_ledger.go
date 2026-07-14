@@ -16,27 +16,29 @@ import (
 	"k8s.io/client-go/util/retry"
 )
 
-type recoveryLedger struct {
+// jobRestartLedger persists the last allowed restart time per Job so duplicate
+// recovery events and controller leader changes do not trigger restart storms.
+type jobRestartLedger struct {
 	client    kubernetes.Interface
 	namespace string
 	now       func() time.Time
 }
 
-func newRecoveryLedger(client kubernetes.Interface, namespace string) *recoveryLedger {
-	return &recoveryLedger{
+func newJobRestartLedger(client kubernetes.Interface, namespace string) *jobRestartLedger {
+	return &jobRestartLedger{
 		client:    client,
 		namespace: namespace,
 		now:       time.Now,
 	}
 }
 
-func recoveryLedgerKey(namespace, jobName string) string {
+func jobRestartLedgerKey(namespace, jobName string) string {
 	sum := sha256.Sum256([]byte(namespace + "\x00" + jobName))
 	return hex.EncodeToString(sum[:])
 }
 
-func (l *recoveryLedger) allowRestart(ctx context.Context, namespace, jobName string, ttl time.Duration) (bool, time.Time, error) {
-	key := recoveryLedgerKey(namespace, jobName)
+func (l *jobRestartLedger) allowRestart(ctx context.Context, namespace, jobName string, ttl time.Duration) (bool, time.Time, error) {
+	key := jobRestartLedgerKey(namespace, jobName)
 	now := l.now().UTC()
 	restartAllowed := false
 	lastRestartAt := time.Time{}
@@ -50,10 +52,10 @@ func (l *recoveryLedger) allowRestart(ctx context.Context, namespace, jobName st
 		requestCtx, cancel := kube.WithRequestTimeout(ctx)
 		defer cancel()
 
-		configMap, err := l.client.CoreV1().ConfigMaps(l.namespace).Get(requestCtx, constants.RecoveryLedgerName, metav1.GetOptions{})
+		configMap, err := l.client.CoreV1().ConfigMaps(l.namespace).Get(requestCtx, constants.JobRestartLedgerName, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
 			configMap = &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{Name: constants.RecoveryLedgerName, Namespace: l.namespace},
+				ObjectMeta: metav1.ObjectMeta{Name: constants.JobRestartLedgerName, Namespace: l.namespace},
 				Data:       map[string]string{key: now.Format(time.RFC3339Nano)},
 			}
 			_, err = l.client.CoreV1().ConfigMaps(l.namespace).Create(requestCtx, configMap, metav1.CreateOptions{})

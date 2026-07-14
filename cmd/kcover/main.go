@@ -78,30 +78,29 @@ func lock(hostName string) *resourcelock.LeaseLock {
 
 func makeElectionCallback(reportCollectionTimeout, sweepInterval time.Duration) (func(ctx context.Context), func()) {
 	cfg := kube.GetK8sConfigConfigWithFile("", "")
-	client := kubernetes.NewForConfigOrDie(cfg)
-	dynamicClient := dynamic.NewForConfigOrDie(cfg)
+	cli := kubernetes.NewForConfigOrDie(cfg)
+	dynCli := dynamic.NewForConfigOrDie(cfg)
 
 	var (
-		recov    runner.Runner
-		detector runner.Runner
-		bridge   events.Bridge
-		reports  runner.Runner
+		recov         runner.Runner
+		detector      runner.Runner
+		evtTransport  *events.KubeEventTransport
+		reportWatcher *preflight.KubeReportWatcher
 	)
 
 	return func(ctx context.Context) {
 			// 当前实例成为 leader 时，开始执行 controller 逻辑
 			var err error
-			bridge = events.NewKubeEventBridge(client)
-			reportTransport := preflight.NewKubeReportStream(dynamicClient)
-			reports = reportTransport
+			evtTransport = events.NewKubeEventTransport(cli)
+			reportWatcher = preflight.NewKubeReportWatcher(dynCli)
 			recov = recovery.NewController(
-				client,
-				bridge,
-				reportTransport,
+				cli,
+				evtTransport,
+				reportWatcher.Reports(),
 				reportCollectionTimeout,
 				sweepInterval,
 			)
-			detector, err = pod.NewDetector(client, bridge)
+			detector, err = pod.NewDetector(cli, evtTransport)
 			if err != nil {
 				panic(err)
 			}
@@ -111,10 +110,10 @@ func makeElectionCallback(reportCollectionTimeout, sweepInterval time.Duration) 
 			if err := detector.Start(ctx); err != nil {
 				panic(err)
 			}
-			if err := bridge.Start(ctx); err != nil {
+			if err := evtTransport.Start(ctx); err != nil {
 				panic(err)
 			}
-			if err := reports.Start(ctx); err != nil {
+			if err := reportWatcher.Start(ctx); err != nil {
 				panic(err)
 			}
 
@@ -122,8 +121,8 @@ func makeElectionCallback(reportCollectionTimeout, sweepInterval time.Duration) 
 		},
 		func() {
 			detector.Stop()
-			reports.Stop()
-			bridge.Stop()
+			reportWatcher.Stop()
+			evtTransport.Stop()
 			recov.Stop()
 			klog.InfoS("kcover stopped")
 		}

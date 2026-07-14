@@ -16,51 +16,50 @@ import (
 	"k8s.io/klog/v2"
 )
 
-type kubeEventBridge struct {
-	*kubeEventSink
+// KubeEventTransport watches Kubernetes Events as an internal recovery stream
+// and records internal events through a Kubernetes event sink.
+type KubeEventTransport struct {
+	sink    *KubeEventSink
 	eventCh chan Event
-	queue   workqueue.TypedRateLimitingInterface[*Event]
+	queue   workqueue.TypedInterface[*Event]
 
 	cancel context.CancelFunc
 	doneCh chan struct{}
 }
 
 const eventMaxAge = 3 * time.Minute
-const bridgeEventBufferSize = 1
+const transportEventBufferSize = 1
 
 var (
 	podObjectGVK  = schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Pod"}
 	nodeObjectGVK = schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Node"}
 )
 
-func NewKubeEventBridge(cli kubernetes.Interface) Bridge {
-	sink := NewKubeEventSink(cli).(*kubeEventSink)
+func NewKubeEventTransport(cli kubernetes.Interface) *KubeEventTransport {
+	sink := NewKubeEventSink(cli)
 
-	return &kubeEventBridge{
-		kubeEventSink: sink,
-		eventCh:       make(chan Event, bridgeEventBufferSize),
-		queue: workqueue.NewTypedRateLimitingQueueWithConfig(
-			workqueue.DefaultTypedControllerRateLimiter[*Event](),
-			workqueue.TypedRateLimitingQueueConfig[*Event]{
-				Name: "kcover-kube-events",
-			},
+	return &KubeEventTransport{
+		sink:    sink,
+		eventCh: make(chan Event, transportEventBufferSize),
+		queue: workqueue.NewTypedWithConfig(
+			workqueue.TypedQueueConfig[*Event]{Name: "kcover-kube-events"},
 		),
 		doneCh: make(chan struct{}),
 	}
 }
 
-func (bridge *kubeEventBridge) Start(parent context.Context) error {
+func (tr *KubeEventTransport) Start(parent context.Context) error {
 	ctx, cancel := context.WithCancel(parent)
-	bridge.cancel = cancel
+	tr.cancel = cancel
 
-	factory := informers.NewSharedInformerFactory(bridge.client, 0)
+	factory := informers.NewSharedInformerFactory(tr.sink.client, 0)
 	informer := factory.Core().V1().Events().Informer()
 
 	_, err := informer.AddEventHandler(cache.FilteringResourceEventHandler{
-		FilterFunc: bridge.shouldWatchEvent,
+		FilterFunc: tr.shouldWatchEvent,
 		Handler: cache.ResourceEventHandlerDetailedFuncs{
-			AddFunc:    func(obj any, isInInitialList bool) { bridge.handleK8sEventAdd(ctx, obj, isInInitialList) },
-			UpdateFunc: func(oldObj, newObj any) { bridge.handleK8sEventUpdate(ctx, oldObj, newObj) },
+			AddFunc:    func(obj any, isInInitialList bool) { tr.handleK8sEventAdd(ctx, obj, isInInitialList) },
+			UpdateFunc: func(oldObj, newObj any) { tr.handleK8sEventUpdate(ctx, oldObj, newObj) },
 		},
 	})
 	if err != nil {
@@ -68,22 +67,22 @@ func (bridge *kubeEventBridge) Start(parent context.Context) error {
 	}
 
 	go informer.Run(ctx.Done())
-	go bridge.runQueueForwarder(ctx)
+	go tr.runQueueForwarder(ctx)
 	go func() {
 		<-ctx.Done()
-		bridge.queue.ShutDown()
+		tr.queue.ShutDown()
 	}()
-	klog.InfoS("kube event bridge started")
+	klog.InfoS("kube event transport started")
 	return nil
 }
 
-func (bridge *kubeEventBridge) shouldWatchEvent(obj any) bool {
+func (tr *KubeEventTransport) shouldWatchEvent(obj any) bool {
 	event, ok := obj.(*corev1.Event)
 	if !ok {
 		return false
 	}
 
-	if bridge.isExpiredEvent(event, time.Now()) {
+	if tr.isExpiredEvent(event, time.Now()) {
 		return false
 	}
 
@@ -102,23 +101,20 @@ func (bridge *kubeEventBridge) shouldWatchEvent(obj any) bool {
 	return isPodObjectRef(event.InvolvedObject)
 }
 
-func (bridge *kubeEventBridge) handleK8sEventAdd(ctx context.Context, obj any, isInInitialList bool) {
+func (tr *KubeEventTransport) handleK8sEventAdd(ctx context.Context, obj any, _ bool) {
 	event, ok := obj.(*corev1.Event)
 	if !ok {
 		return
 	}
-	if isInInitialList {
+
+	if tr.isExpiredEvent(event, time.Now()) {
 		return
 	}
 
-	if bridge.isExpiredEvent(event, time.Now()) {
-		return
-	}
-
-	bridge.forwardK8sEvent(ctx, event)
+	tr.forwardK8sEvent(ctx, event)
 }
 
-func (bridge *kubeEventBridge) handleK8sEventUpdate(ctx context.Context, oldObj, newObj any) {
+func (tr *KubeEventTransport) handleK8sEventUpdate(ctx context.Context, oldObj, newObj any) {
 	oldEvent, oldOK := oldObj.(*corev1.Event)
 	newEvent, newOK := newObj.(*corev1.Event)
 	if !oldOK || !newOK {
@@ -129,11 +125,11 @@ func (bridge *kubeEventBridge) handleK8sEventUpdate(ctx context.Context, oldObj,
 		return
 	}
 
-	if bridge.isExpiredEvent(newEvent, time.Now()) {
+	if tr.isExpiredEvent(newEvent, time.Now()) {
 		return
 	}
 
-	bridge.forwardK8sEvent(ctx, newEvent)
+	tr.forwardK8sEvent(ctx, newEvent)
 }
 
 func hasNewEventOccurrence(oldEvent, newEvent *corev1.Event) bool {
@@ -151,8 +147,8 @@ func hasNewEventOccurrence(oldEvent, newEvent *corev1.Event) bool {
 
 }
 
-func (bridge *kubeEventBridge) forwardK8sEvent(ctx context.Context, event *corev1.Event) {
-	evt, ok := bridge.toInternalEvent(event)
+func (tr *KubeEventTransport) forwardK8sEvent(ctx context.Context, event *corev1.Event) {
+	evt, ok := tr.toInternalEvent(event)
 	if !ok {
 		return
 	}
@@ -161,44 +157,43 @@ func (bridge *kubeEventBridge) forwardK8sEvent(ctx context.Context, event *corev
 	select {
 	case <-ctx.Done():
 		return
-	case bridge.eventCh <- evt:
+	case tr.eventCh <- evt:
 		return
 	default:
 	}
 
-	bridge.queue.Add(&evt)
+	tr.queue.Add(&evt)
 }
 
-func (bridge *kubeEventBridge) runQueueForwarder(ctx context.Context) {
-	defer close(bridge.doneCh)
+func (tr *KubeEventTransport) runQueueForwarder(ctx context.Context) {
+	defer close(tr.doneCh)
 
 	for {
-		evt, shutdown := bridge.queue.Get()
+		evt, shutdown := tr.queue.Get()
 		if shutdown {
 			return
 		}
 		if evt == nil {
-			bridge.finishQueueItem(evt)
-			klog.ErrorS(nil, "kube event bridge received nil queue item")
+			tr.finishQueueItem(evt)
+			klog.ErrorS(nil, "kube event transport received nil queue item")
 			continue
 		}
 
 		select {
-		case bridge.eventCh <- *evt:
+		case tr.eventCh <- *evt:
 		case <-ctx.Done():
-			bridge.finishQueueItem(evt)
+			tr.finishQueueItem(evt)
 			return
 		}
-		bridge.finishQueueItem(evt)
+		tr.finishQueueItem(evt)
 	}
 }
 
-func (bridge *kubeEventBridge) finishQueueItem(evt *Event) {
-	bridge.queue.Forget(evt)
-	bridge.queue.Done(evt)
+func (tr *KubeEventTransport) finishQueueItem(evt *Event) {
+	tr.queue.Done(evt)
 }
 
-func (bridge *kubeEventBridge) isExpiredEvent(event *corev1.Event, now time.Time) bool {
+func (tr *KubeEventTransport) isExpiredEvent(event *corev1.Event, now time.Time) bool {
 	eventTimestamp := event.LastTimestamp
 	if eventTimestamp.IsZero() {
 		eventTimestamp = event.CreationTimestamp
@@ -211,7 +206,7 @@ func (bridge *kubeEventBridge) isExpiredEvent(event *corev1.Event, now time.Time
 	return false
 }
 
-func (bridge *kubeEventBridge) toInternalEvent(event *corev1.Event) (Event, bool) {
+func (tr *KubeEventTransport) toInternalEvent(event *corev1.Event) (Event, bool) {
 	if IsPreflightEvent(event.Annotations) {
 		return Event{}, false
 	}
@@ -220,10 +215,10 @@ func (bridge *kubeEventBridge) toInternalEvent(event *corev1.Event) (Event, bool
 		return Event{}, false
 	}
 
-	return bridge.toInternalRecoveryEvent(event)
+	return tr.toInternalRecoveryEvent(event)
 }
 
-func (bridge *kubeEventBridge) toInternalRecoveryEvent(event *corev1.Event) (Event, bool) {
+func (tr *KubeEventTransport) toInternalRecoveryEvent(event *corev1.Event) (Event, bool) {
 	obj := event.InvolvedObject
 	if isPodObjectRef(obj) {
 		return Event{
@@ -260,15 +255,19 @@ func isPodObjectRef(ref corev1.ObjectReference) bool {
 	return ref.GroupVersionKind() == podObjectGVK
 }
 
-func (bridge *kubeEventBridge) Stop() {
-	if bridge.cancel != nil {
-		bridge.cancel()
+func (tr *KubeEventTransport) Stop() {
+	if tr.cancel != nil {
+		tr.cancel()
 	}
-	bridge.queue.ShutDown()
-	<-bridge.doneCh
-	close(bridge.eventCh)
+	tr.queue.ShutDown()
+	<-tr.doneCh
+	close(tr.eventCh)
 }
 
-func (bridge *kubeEventBridge) EventChan() <-chan Event {
-	return bridge.eventCh
+func (tr *KubeEventTransport) EventChan() <-chan Event {
+	return tr.eventCh
+}
+
+func (tr *KubeEventTransport) RecordEvent(event Event) error {
+	return tr.sink.RecordEvent(event)
 }

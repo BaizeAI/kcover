@@ -1,9 +1,6 @@
 package events
 
-import (
-	"github.com/baizeai/kcover/pkg/constants"
-	"github.com/baizeai/kcover/pkg/runner"
-)
+import "github.com/baizeai/kcover/pkg/constants"
 
 type ResourceType string
 
@@ -29,13 +26,6 @@ type Event struct {
 
 	EventType
 	Message string
-}
-
-type Bridge interface {
-	runner.Runner
-
-	Sink
-	Stream
 }
 
 type Sink interface {

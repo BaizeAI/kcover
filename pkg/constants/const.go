@@ -15,7 +15,7 @@ const (
 	LegacyNodeNameEnv           = "FAST_RECOVERY_NODE_NAME"
 	// recovery annotations
 	NeedRecoveryAnnotation = "kcover.io/need-recovery"
-	RecoveryLedgerName     = "kcover-recovery-ledger"
+	JobRestartLedgerName   = "kcover-recovery-ledger"
 
 	EnabledRecoveryLabel = "kcover.io/cascading-recovery"
 

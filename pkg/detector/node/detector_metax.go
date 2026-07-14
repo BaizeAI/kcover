@@ -85,6 +85,8 @@ func (d *metaXDetector) day2Check(ctx context.Context) {
 	}
 	klog.ErrorS(err, "MetaX day2 check failed")
 
+	// TODO: Persist Day2 results in a NodeHealthReport CRD and let the
+	// controller watch that durable state instead of using Events for control.
 	evt := events.Event{
 		ResourceType: events.Node,
 		Name:         d.config.NodeName,

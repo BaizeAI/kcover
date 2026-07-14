@@ -8,21 +8,11 @@ import (
 
 	kcoverv1alpha1 "github.com/baizeai/kcover/pkg/apis/kcover/v1alpha1"
 	"github.com/baizeai/kcover/pkg/events"
-	"github.com/baizeai/kcover/pkg/runner"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 )
-
-type ReportPublisher interface {
-	runner.Runner
-	ReportSubmitter
-}
-
-type ReportSubmitter interface {
-	SubmitReport(*kcoverv1alpha1.PreflightReport) error
-}
 
 type publisherState int
 
@@ -30,55 +20,46 @@ const (
 	publisherNew publisherState = iota
 	publisherRunning
 	publisherStopped
-	reportWorkerCount = 3
-	eventBufferSize   = 128
 )
 
-type reportPublisher struct {
+// ReportPublisher accepts reports from collectors and delivers them
+// asynchronously. It owns queuing, retries, and the observation event emitted
+// after a report is first persisted.
+type ReportPublisher struct {
 	reportSink ReportSink
 	eventSink  events.Sink
 	queue      workqueue.TypedRateLimitingInterface[string]
-	eventCh    chan events.Event
 
-	mu       sync.Mutex
-	state    publisherState
-	cancel   context.CancelFunc
-	pending  map[string]*kcoverv1alpha1.PreflightReport
-	reportWG sync.WaitGroup
-	eventWG  sync.WaitGroup
-	doneCh   chan struct{}
+	mu      sync.Mutex
+	state   publisherState
+	cancel  context.CancelFunc
+	pending map[string]*kcoverv1alpha1.PreflightReport
+	doneCh  chan struct{}
 }
 
-func NewReportPublisher(reportSink ReportSink, eventSink events.Sink) (ReportPublisher, error) {
-	if reportSink == nil {
+func NewReportPublisher(rSink ReportSink, eSink events.Sink) (*ReportPublisher, error) {
+	if rSink == nil {
 		return nil, fmt.Errorf("preflight report sink cannot be nil")
 	}
-	if eventSink == nil {
+	if eSink == nil {
 		return nil, fmt.Errorf("preflight event sink cannot be nil")
 	}
 
-	return newReportPublisher(
-		reportSink,
-		eventSink,
-		workqueue.NewTypedItemExponentialFailureRateLimiter[string](100*time.Millisecond, 30*time.Second),
-	), nil
-}
-
-func newReportPublisher(reportSink ReportSink, eventSink events.Sink, rateLimiter workqueue.TypedRateLimiter[string]) *reportPublisher {
-	return &reportPublisher{
-		reportSink: reportSink,
-		eventSink:  eventSink,
+	return &ReportPublisher{
+		reportSink: rSink,
+		eventSink:  eSink,
 		queue: workqueue.NewTypedRateLimitingQueueWithConfig(
-			rateLimiter,
+			workqueue.NewTypedItemExponentialFailureRateLimiter[string](100*time.Millisecond, 30*time.Second),
 			workqueue.TypedRateLimitingQueueConfig[string]{Name: "kcover-preflight-reports"},
 		),
 		pending: make(map[string]*kcoverv1alpha1.PreflightReport),
-		eventCh: make(chan events.Event, eventBufferSize),
 		doneCh:  make(chan struct{}),
-	}
+	}, nil
 }
 
-func (p *reportPublisher) SubmitReport(report *kcoverv1alpha1.PreflightReport) error {
+// Submit accepts a report for asynchronous delivery. A nil error means that the
+// report was accepted, not that it has been persisted.
+func (p *ReportPublisher) Submit(report *kcoverv1alpha1.PreflightReport) error {
 	if report == nil || report.Namespace == "" || report.Name == "" {
 		return fmt.Errorf("preflight report identity is empty")
 	}
@@ -94,7 +75,7 @@ func (p *reportPublisher) SubmitReport(report *kcoverv1alpha1.PreflightReport) e
 	return nil
 }
 
-func (p *reportPublisher) Start(parent context.Context) error {
+func (p *ReportPublisher) Start(parent context.Context) error {
 	p.mu.Lock()
 	switch p.state {
 	case publisherRunning:
@@ -107,44 +88,33 @@ func (p *reportPublisher) Start(parent context.Context) error {
 	ctx, cancel := context.WithCancel(parent)
 	p.cancel = cancel
 	p.state = publisherRunning
-	p.reportWG.Add(reportWorkerCount)
-	p.eventWG.Add(1)
 	p.mu.Unlock()
 
-	for range reportWorkerCount {
-		go p.runReportWorker()
-	}
-	go p.runEventWorker()
+	go func() {
+		defer close(p.doneCh)
+		p.run()
+	}()
 	go func() {
 		<-ctx.Done()
 		p.queue.ShutDown()
-	}()
-	go func() {
-		p.reportWG.Wait()
-		close(p.eventCh)
-		p.eventWG.Wait()
-		close(p.doneCh)
 	}()
 	klog.InfoS("preflight report publisher started")
 	return nil
 }
 
-func (p *reportPublisher) runReportWorker() {
-	defer p.reportWG.Done()
+func (p *ReportPublisher) run() {
 	for p.processNext() {
 	}
 }
 
-func (p *reportPublisher) runEventWorker() {
-	defer p.eventWG.Done()
-	for event := range p.eventCh {
-		if err := p.eventSink.RecordEvent(event); err != nil {
-			klog.ErrorS(err, "failed to record PreflightReport observation", "namespace", event.Namespace, "node", event.Name)
-		}
+func (p *ReportPublisher) recordObservation(report *kcoverv1alpha1.PreflightReport) {
+	event := ObservationEvent(report)
+	if err := p.eventSink.RecordEvent(event); err != nil {
+		klog.ErrorS(err, "failed to record PreflightReport observation", "namespace", event.Namespace, "node", event.Name)
 	}
 }
 
-func (p *reportPublisher) processNext() bool {
+func (p *ReportPublisher) processNext() bool {
 	key, shutdown := p.queue.Get()
 	if shutdown {
 		return false
@@ -174,17 +144,13 @@ func (p *reportPublisher) processNext() bool {
 
 	p.finish(key)
 	if created {
-		select {
-		case p.eventCh <- ObservationEvent(report):
-		default:
-			klog.ErrorS(nil, "drop PreflightReport observation because event queue is full", "namespace", report.Namespace, "name", report.Name)
-		}
+		p.recordObservation(report)
 	}
 	klog.V(3).InfoS("published PreflightReport", "namespace", report.Namespace, "name", report.Name, "created", created)
 	return true
 }
 
-func (p *reportPublisher) finish(key string) {
+func (p *ReportPublisher) finish(key string) {
 	p.queue.Forget(key)
 	p.mu.Lock()
 	delete(p.pending, key)
@@ -195,7 +161,7 @@ func isPermanentReportWriteError(err error) bool {
 	return apierrors.IsInvalid(err) || apierrors.IsBadRequest(err)
 }
 
-func (p *reportPublisher) Stop() {
+func (p *ReportPublisher) Stop() {
 	p.mu.Lock()
 	if p.state == publisherStopped {
 		doneCh := p.doneCh
@@ -206,7 +172,6 @@ func (p *reportPublisher) Stop() {
 	if p.state == publisherNew {
 		p.state = publisherStopped
 		p.queue.ShutDown()
-		close(p.eventCh)
 		close(p.doneCh)
 		p.mu.Unlock()
 		return
@@ -223,5 +188,3 @@ func (p *reportPublisher) Stop() {
 	<-doneCh
 	klog.InfoS("preflight report publisher stopped")
 }
-
-var _ ReportPublisher = (*reportPublisher)(nil)

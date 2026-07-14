@@ -21,18 +21,18 @@ import (
 type RecoveryController struct {
 	client                 kubernetes.Interface
 	eventStream            events.Stream
-	reportStream           preflight.ReportStream
+	reportCh               <-chan *kcoverv1alpha1.PreflightReport
 	cancel                 context.CancelFunc
 	doneCh                 chan struct{}
 	preflight              *preflightTracker
 	preflightSweepInterval time.Duration
 	restartDuration        time.Duration
-	restartLedger          *recoveryLedger
+	jobRestartLedger       *jobRestartLedger
 }
 
 const DefaultPreflightSweepInterval = time.Minute
 
-func NewController(cli kubernetes.Interface, stream events.Stream, reportStream preflight.ReportStream, preflightReportCollectionTimeout, preflightSweepInterval time.Duration) *RecoveryController {
+func NewController(cli kubernetes.Interface, stream events.Stream, reportCh <-chan *kcoverv1alpha1.PreflightReport, preflightReportCollectionTimeout, preflightSweepInterval time.Duration) *RecoveryController {
 	if preflightSweepInterval <= 0 {
 		preflightSweepInterval = DefaultPreflightSweepInterval
 	}
@@ -40,11 +40,11 @@ func NewController(cli kubernetes.Interface, stream events.Stream, reportStream 
 	controller := &RecoveryController{
 		client:                 cli,
 		eventStream:            stream,
-		reportStream:           reportStream,
+		reportCh:               reportCh,
 		preflight:              newPreflightTracker(preflightReportCollectionTimeout),
 		preflightSweepInterval: preflightSweepInterval,
 		restartDuration:        time.Second * 30,
-		restartLedger:          newRecoveryLedger(cli, kube.CurrentNamespace()),
+		jobRestartLedger:       newJobRestartLedger(cli, kube.CurrentNamespace()),
 	}
 	return controller
 }
@@ -116,7 +116,7 @@ func (r *RecoveryController) isRecoveryEnabledForPod(ctx context.Context, pod *c
 }
 
 func (r *RecoveryController) allowJobRestart(ctx context.Context, namespace, jobLabel string) (bool, error) {
-	restartAllowed, lastRestartAt, err := r.restartLedger.allowRestart(ctx, namespace, jobLabel, r.restartDuration)
+	restartAllowed, lastRestartAt, err := r.jobRestartLedger.allowRestart(ctx, namespace, jobLabel, r.restartDuration)
 	if err != nil {
 		return false, err
 	}
@@ -243,16 +243,10 @@ func (r *RecoveryController) onPreflightReport(ctx context.Context, report *kcov
 		return
 	}
 
-	if result.duplicate {
-		klog.V(2).InfoS("skip duplicate PreflightReport", "namespace", report.Namespace, "name", report.Name, "node", report.Spec.NodeName, "workload", result.workloadName)
-		return
-	}
-
 	if result.waiting {
 		klog.V(2).InfoS("buffer PreflightReport", "namespace", report.Namespace, "workload", result.workloadName, "state", "waiting")
 		return
 	}
-
 	if len(result.slowNodes) == 0 {
 		klog.InfoS("preflight report finished without slow nodes", "namespace", report.Namespace, "workload", result.workloadName)
 		return
@@ -301,10 +295,7 @@ func (r *RecoveryController) Start(parent context.Context) error {
 		ticker := time.NewTicker(r.preflightSweepInterval)
 		defer ticker.Stop()
 		eventCh := r.eventStream.EventChan()
-		var reportCh <-chan *kcoverv1alpha1.PreflightReport
-		if r.reportStream != nil {
-			reportCh = r.reportStream.Reports()
-		}
+		reportCh := r.reportCh
 		for {
 			select {
 			case <-ctx.Done():

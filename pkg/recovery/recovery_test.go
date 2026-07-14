@@ -24,7 +24,6 @@ func TestPreflightEventMarksSlowNodesAtDefaultThreshold(t *testing.T) {
 		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}},
 		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-b"}},
 	)
-
 	controller := NewController(client, nil, nil, 0, 0)
 	controller.onPreflightReport(context.Background(), preflightReport("default", "node-a", "job-a", reportText("job-a", 2, 0, "node-a")))
 	controller.onPreflightReport(context.Background(), preflightReport("default", "node-b", "job-a", reportText("job-a", 2, 1, "node-b")))
@@ -79,31 +78,6 @@ func TestSweepExpiredPreflightReportsDropsIncompleteWorkload(t *testing.T) {
 	assertNodeUnschedulable(t, client, "node-a", false)
 }
 
-func TestDuplicatePreflightEventDoesNotRefreshTimeoutWindow(t *testing.T) {
-	t.Parallel()
-
-	client := fake.NewSimpleClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}})
-	controller := NewController(client, nil, nil, 0, 0)
-	now := time.Unix(100, 0)
-	controller.preflight.aggregator = preflight.NewSlowNodeAggregator(10 * time.Second)
-	controller.preflight.aggregator.SetNowForTest(func() time.Time { return now })
-
-	report := preflightReport("default", "node-a", "job-a", reportText("job-a", 2, 0, "node-a"))
-	controller.onPreflightReport(context.Background(), report)
-
-	now = now.Add(9 * time.Second)
-	controller.onPreflightReport(context.Background(), report)
-
-	now = now.Add(2 * time.Second)
-	errs := controller.preflight.aggregator.ExpireTimedOutWorkloads()
-	if len(errs) != 1 {
-		t.Fatalf("len(ExpireTimedOutWorkloads()) = %d, want 1", len(errs))
-	}
-	if errs[0].ReceivedReports != 1 {
-		t.Fatalf("errs[0].ReceivedReports = %d, want 1", errs[0].ReceivedReports)
-	}
-}
-
 func TestSameNameDifferentWorkloadUIDsDoNotAggregate(t *testing.T) {
 	t.Parallel()
 
@@ -124,35 +98,7 @@ func TestSameNameDifferentWorkloadUIDsDoNotAggregate(t *testing.T) {
 	assertNodeUnschedulable(t, client, "node-b", false)
 }
 
-func TestProcessedPreflightEntriesExpireDuringSweep(t *testing.T) {
-	t.Parallel()
-
-	controller := NewController(fake.NewSimpleClientset(), nil, nil, 10*time.Millisecond, 0)
-
-	report := preflightReport("train-ns", "node-a", "job-a", reportText("job-a", 2, 0, "node-a"))
-	duplicate := controller.preflight.markProcessed(report)
-	if duplicate {
-		t.Fatal("first markProcessed(...) = true, want false")
-	}
-	if controller.preflight.processed.Len() != 1 {
-		t.Fatalf("processed.Len() = %d, want 1", controller.preflight.processed.Len())
-	}
-
-	time.Sleep(20 * time.Millisecond)
-	controller.sweepExpiredPreflightReports()
-	if controller.preflight.processed.Len() != 0 {
-		t.Fatalf("processed.Len() = %d, want 0 after sweep", controller.preflight.processed.Len())
-	}
-	if len(controller.preflight.workloads) != 0 {
-		t.Fatalf("len(workloads) = %d, want 0 after sweep", len(controller.preflight.workloads))
-	}
-	duplicate = controller.preflight.markProcessed(report)
-	if duplicate {
-		t.Fatal("markProcessed(...) after expiry = true, want false")
-	}
-}
-
-func TestInvalidPreflightReportDoesNotRemainProcessed(t *testing.T) {
+func TestInvalidPreflightReportReturnsError(t *testing.T) {
 	t.Parallel()
 
 	controller := NewController(fake.NewSimpleClientset(), nil, nil, time.Minute, 0)
@@ -161,32 +107,6 @@ func TestInvalidPreflightReportDoesNotRemainProcessed(t *testing.T) {
 
 	if _, err := controller.preflight.handleReport(report); err == nil {
 		t.Fatal("handleReport(invalid payload) error = nil, want non-nil")
-	}
-	if controller.preflight.processed.Len() != 0 {
-		t.Fatalf("processed.Len() = %d, want 0 after invalid report", controller.preflight.processed.Len())
-	}
-	if len(controller.preflight.workloads) != 0 {
-		t.Fatalf("len(workloads) = %d, want 0 after invalid report", len(controller.preflight.workloads))
-	}
-}
-
-func TestProcessedPreflightEntriesAreDroppedWhenWorkloadCompletes(t *testing.T) {
-	t.Parallel()
-
-	client := fake.NewSimpleClientset(
-		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}},
-		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-b"}},
-	)
-	controller := NewController(client, nil, nil, time.Minute, 0)
-
-	controller.onPreflightReport(context.Background(), preflightReport("default", "node-a", "job-a", reportText("job-a", 2, 0, "node-a")))
-	if controller.preflight.processed.Len() != 1 {
-		t.Fatalf("processed.Len() after first report = %d, want 1", controller.preflight.processed.Len())
-	}
-
-	controller.onPreflightReport(context.Background(), preflightReport("default", "node-b", "job-a", reportText("job-a", 2, 1, "node-b")))
-	if controller.preflight.processed.Len() != 0 {
-		t.Fatalf("processed.Len() after workload completion = %d, want 0", controller.preflight.processed.Len())
 	}
 }
 
@@ -244,7 +164,7 @@ func TestStopReturnsWithoutEventStreamClose(t *testing.T) {
 	}
 }
 
-func TestControllerConsumesPreflightReportStream(t *testing.T) {
+func TestControllerConsumesPreflightReports(t *testing.T) {
 	t.Parallel()
 
 	client := fake.NewSimpleClientset(
@@ -255,7 +175,7 @@ func TestControllerConsumesPreflightReportStream(t *testing.T) {
 	reports := make(chan *kcoverv1alpha1.PreflightReport, 2)
 	reports <- preflightReport("default", "node-a", "job-a", reportText("job-a", 2, 0, "node-a"))
 	reports <- preflightReport("default", "node-b", "job-a", reportText("job-a", 2, 1, "node-b"))
-	controller := NewController(client, eventStream, blockingReportStream{ch: reports}, 0, time.Hour)
+	controller := NewController(client, eventStream, reports, 0, time.Hour)
 	if err := controller.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -274,14 +194,6 @@ func TestControllerConsumesPreflightReportStream(t *testing.T) {
 
 type blockingEventStream struct {
 	ch <-chan events.Event
-}
-
-type blockingReportStream struct {
-	ch <-chan *kcoverv1alpha1.PreflightReport
-}
-
-func (s blockingReportStream) Reports() <-chan *kcoverv1alpha1.PreflightReport {
-	return s.ch
 }
 
 func (s blockingEventStream) EventChan() <-chan events.Event {

@@ -25,7 +25,7 @@ type initialListCountingRule struct {
 	addCountingRule
 }
 
-func (*initialListCountingRule) HandleInitialList() bool {
+func (*initialListCountingRule) ShouldHandleInitialList() bool {
 	return true
 }
 
@@ -33,7 +33,7 @@ func TestHandleAddSkipsInitialListPod(t *testing.T) {
 	t.Parallel()
 
 	rule := &addCountingRule{}
-	observer := &observer{rules: []PodRule{rule}}
+	observer := &Observer{rules: []PodRule{rule}}
 	pod := &corev1.Pod{}
 
 	observer.handleAdd(pod, true)
@@ -51,7 +51,7 @@ func TestHandleAddAllowsOptedInInitialListRule(t *testing.T) {
 	t.Parallel()
 
 	rule := &initialListCountingRule{}
-	observer := &observer{rules: []PodRule{rule}}
+	observer := &Observer{rules: []PodRule{rule}}
 	observer.handleAdd(&corev1.Pod{}, true)
 
 	if rule.adds != 1 {

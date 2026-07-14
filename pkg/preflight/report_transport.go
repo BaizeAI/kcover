@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	kcoverv1alpha1 "github.com/baizeai/kcover/pkg/apis/kcover/v1alpha1"
+	kcoverv1a1 "github.com/baizeai/kcover/pkg/apis/kcover/v1alpha1"
 	"github.com/baizeai/kcover/pkg/kube"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -22,26 +22,27 @@ import (
 )
 
 var PreflightReportGVR = schema.GroupVersionResource{
-	Group: kcoverv1alpha1.Group, Version: kcoverv1alpha1.Version, Resource: "preflightreports",
+	Group: kcoverv1a1.Group, Version: kcoverv1a1.Version, Resource: "preflightreports",
 }
 
+// ReportSink performs one persistence attempt for a PreflightReport. Retry,
+// concurrency, and lifecycle management belong to ReportPublisher.
 type ReportSink interface {
-	WriteReport(*kcoverv1alpha1.PreflightReport) (bool, error)
+	WriteReport(*kcoverv1a1.PreflightReport) (bool, error)
 }
 
-type ReportStream interface {
-	Reports() <-chan *kcoverv1alpha1.PreflightReport
-}
-
-type kubeReportSink struct {
+// KubeReportSink implements ReportSink through the Kubernetes API. It reports
+// whether the call created the resource so the publisher emits one observation.
+type KubeReportSink struct {
 	client dynamic.Interface
 }
 
-func NewKubeReportSink(client dynamic.Interface) ReportSink {
-	return &kubeReportSink{client: client}
+func NewKubeReportSink(client dynamic.Interface) *KubeReportSink {
+	return &KubeReportSink{client: client}
 }
 
-func BuildPreflightReport(namespace, nodeName, workloadName, workloadUID, reportText string, observedAt time.Time, owners ...metav1.OwnerReference) (*kcoverv1alpha1.PreflightReport, error) {
+func BuildPreflightReport(namespace, nodeName, workloadName, workloadUID, reportText string,
+	observedAt time.Time, owners ...metav1.OwnerReference) (*kcoverv1a1.PreflightReport, error) {
 	if namespace == "" {
 		return nil, fmt.Errorf("preflight namespace is empty")
 	}
@@ -65,10 +66,10 @@ func BuildPreflightReport(namespace, nodeName, workloadName, workloadUID, report
 	identity := reportIdentity(namespace, workloadUID, nodeName, report.Rank, reportText)
 	sum := sha256.Sum256([]byte(identity))
 
-	return &kcoverv1alpha1.PreflightReport{
-		TypeMeta:   metav1.TypeMeta{APIVersion: kcoverv1alpha1.Group + "/" + kcoverv1alpha1.Version, Kind: "PreflightReport"},
+	return &kcoverv1a1.PreflightReport{
+		TypeMeta:   metav1.TypeMeta{APIVersion: kcoverv1a1.Group + "/" + kcoverv1a1.Version, Kind: "PreflightReport"},
 		ObjectMeta: metav1.ObjectMeta{Name: "preflight-" + hex.EncodeToString(sum[:20]), Namespace: namespace, OwnerReferences: owners},
-		Spec: kcoverv1alpha1.PreflightReportSpec{
+		Spec: kcoverv1a1.PreflightReportSpec{
 			WorkloadName: workloadName,
 			WorkloadUID:  workloadUID,
 			NodeName:     nodeName,
@@ -79,7 +80,7 @@ func BuildPreflightReport(namespace, nodeName, workloadName, workloadUID, report
 	}, nil
 }
 
-func (s *kubeReportSink) WriteReport(report *kcoverv1alpha1.PreflightReport) (bool, error) {
+func (s *KubeReportSink) WriteReport(report *kcoverv1a1.PreflightReport) (bool, error) {
 	if s == nil || s.client == nil {
 		return false, fmt.Errorf("preflight report client is nil")
 	}
@@ -105,9 +106,11 @@ func (s *kubeReportSink) WriteReport(report *kcoverv1alpha1.PreflightReport) (bo
 	return true, nil
 }
 
-type kubeReportStream struct {
+// KubeReportWatcher watches PreflightReport resources and exposes validated
+// reports through a process-local channel.
+type KubeReportWatcher struct {
 	client      dynamic.Interface
-	reportCh    chan *kcoverv1alpha1.PreflightReport
+	reportCh    chan *kcoverv1a1.PreflightReport
 	syncTimeout time.Duration
 	cancel      context.CancelFunc
 	doneCh      chan struct{}
@@ -115,15 +118,15 @@ type kubeReportStream struct {
 
 const defaultReportSyncTimeout = 30 * time.Second
 
-func NewKubeReportStream(client dynamic.Interface) *kubeReportStream {
-	return &kubeReportStream{
+func NewKubeReportWatcher(client dynamic.Interface) *KubeReportWatcher {
+	return &KubeReportWatcher{
 		client:      client,
-		reportCh:    make(chan *kcoverv1alpha1.PreflightReport, 128),
+		reportCh:    make(chan *kcoverv1a1.PreflightReport, 128),
 		syncTimeout: defaultReportSyncTimeout,
 	}
 }
 
-func (s *kubeReportStream) Start(parent context.Context) error {
+func (s *KubeReportWatcher) Start(parent context.Context) error {
 	if s.client == nil {
 		return fmt.Errorf("preflight report client is nil")
 	}
@@ -156,7 +159,7 @@ func (s *kubeReportStream) Start(parent context.Context) error {
 	return nil
 }
 
-func (s *kubeReportStream) forward(ctx context.Context, obj any) {
+func (s *KubeReportWatcher) forward(ctx context.Context, obj any) {
 	report, err := reportFromObject(obj)
 	if err != nil {
 		klog.ErrorS(err, "ignore invalid PreflightReport")
@@ -169,35 +172,58 @@ func (s *kubeReportStream) forward(ctx context.Context, obj any) {
 	}
 }
 
-func reportFromObject(obj any) (*kcoverv1alpha1.PreflightReport, error) {
+func reportFromObject(obj any) (*kcoverv1a1.PreflightReport, error) {
 	resource, ok := obj.(*unstructured.Unstructured)
 	if !ok {
 		return nil, fmt.Errorf("unexpected PreflightReport object %T", obj)
 	}
-	report := &kcoverv1alpha1.PreflightReport{}
+	report := &kcoverv1a1.PreflightReport{}
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(resource.Object, report); err != nil {
 		return nil, fmt.Errorf("convert PreflightReport %s/%s: %w", resource.GetNamespace(), resource.GetName(), err)
 	}
-	if report.Name == "" || report.Namespace == "" || report.Spec.WorkloadName == "" || report.Spec.WorkloadUID == "" || report.Spec.NodeName == "" || report.Spec.Report == "" || report.Spec.ObservedAt.IsZero() {
-		return nil, fmt.Errorf("PreflightReport %s/%s has required fields missing", resource.GetNamespace(), resource.GetName())
-	}
-	payload, _, _, err := extractNodeReport(report.Spec.Report)
-	if err != nil {
-		return nil, fmt.Errorf("PreflightReport %s/%s has invalid report: %w", report.Namespace, report.Name, err)
-	}
-	if payload.NodeName != report.Spec.NodeName {
-		return nil, fmt.Errorf("PreflightReport %s/%s nodeName %q does not match payload node_name %q", report.Namespace, report.Name, report.Spec.NodeName, payload.NodeName)
-	}
-	if payload.Rank != int(report.Spec.Rank) {
-		return nil, fmt.Errorf("PreflightReport %s/%s rank %d does not match payload rank %d", report.Namespace, report.Name, report.Spec.Rank, payload.Rank)
-	}
-	if payload.Workload != "" && payload.Workload != report.Spec.WorkloadName {
-		return nil, fmt.Errorf("PreflightReport %s/%s workloadName %q does not match payload workload %q", report.Namespace, report.Name, report.Spec.WorkloadName, payload.Workload)
+	if err := validateReport(report); err != nil {
+		return nil, fmt.Errorf("invalid PreflightReport %s/%s: %w", resource.GetNamespace(), resource.GetName(), err)
 	}
 	return report, nil
 }
 
-func (s *kubeReportStream) Stop() {
+func validateReport(report *kcoverv1a1.PreflightReport) error {
+	switch {
+	case report == nil:
+		return fmt.Errorf("report is nil")
+	case report.Name == "":
+		return fmt.Errorf("metadata.name is empty")
+	case report.Namespace == "":
+		return fmt.Errorf("metadata.namespace is empty")
+	case report.Spec.WorkloadName == "":
+		return fmt.Errorf("spec.workloadName is empty")
+	case report.Spec.WorkloadUID == "":
+		return fmt.Errorf("spec.workloadUID is empty")
+	case report.Spec.NodeName == "":
+		return fmt.Errorf("spec.nodeName is empty")
+	case report.Spec.Report == "":
+		return fmt.Errorf("spec.report is empty")
+	case report.Spec.ObservedAt.IsZero():
+		return fmt.Errorf("spec.observedAt is empty")
+	}
+
+	payload, err := parseReport(report.Spec.Report)
+	if err != nil {
+		return fmt.Errorf("spec.report is invalid: %w", err)
+	}
+	if payload.NodeName != report.Spec.NodeName {
+		return fmt.Errorf("spec.nodeName %q does not match payload node_name %q", report.Spec.NodeName, payload.NodeName)
+	}
+	if payload.Rank != int(report.Spec.Rank) {
+		return fmt.Errorf("spec.rank %d does not match payload rank %d", report.Spec.Rank, payload.Rank)
+	}
+	if payload.Workload != "" && payload.Workload != report.Spec.WorkloadName {
+		return fmt.Errorf("spec.workloadName %q does not match payload workload %q", report.Spec.WorkloadName, payload.Workload)
+	}
+	return nil
+}
+
+func (s *KubeReportWatcher) Stop() {
 	if s.cancel != nil {
 		s.cancel()
 	}
@@ -207,6 +233,6 @@ func (s *kubeReportStream) Stop() {
 	close(s.reportCh)
 }
 
-func (s *kubeReportStream) Reports() <-chan *kcoverv1alpha1.PreflightReport {
+func (s *KubeReportWatcher) Reports() <-chan *kcoverv1a1.PreflightReport {
 	return s.reportCh
 }

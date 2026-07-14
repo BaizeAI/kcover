@@ -15,6 +15,12 @@ import (
 
 type containerErrorRule struct{}
 
+// ShouldHandleInitialList ensures a newly elected controller observes failures
+// that happened before its Pod informer started.
+func (containerErrorRule) ShouldHandleInitialList() bool {
+	return true
+}
+
 // NewDetector 创建由 pod 检测管理的检测器，目前只支持 Pod 容器错误检测。
 func NewDetector(cli kubernetes.Interface, sink events.Sink) (runner.Runner, error) {
 	observer, err := podobserver.New(cli, sink, "pod detector", containerErrorRule{})

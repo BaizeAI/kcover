@@ -50,18 +50,14 @@ app.kubernetes.io/name: {{ include "kcover.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
-{{/*
-Create the name of the agent service account to use
-*/}}
+{{/* Create the name of the agent service account to use. */}}
 {{- define "kcover.agentServiceAccountName" -}}
-{{- default (printf "%s-agent" (include "kcover.fullname" .) | trunc 63 | trimSuffix "-") .Values.agent.serviceAccount.name }}
+{{- default (printf "%s-agent" (include "kcover.fullname" .) | trunc 63 | trimSuffix "-") .Values.agent.serviceAccount.name -}}
 {{- end }}
 
-{{/*
-Create the name of the controller service account to use
-*/}}
+{{/* Create the name of the controller service account to use. */}}
 {{- define "kcover.controllerServiceAccountName" -}}
-{{- default (printf "%s-controller" (include "kcover.fullname" .) | trunc 63 | trimSuffix "-") .Values.controller.serviceAccount.name }}
+{{- default (printf "%s-controller" (include "kcover.fullname" .) | trunc 63 | trimSuffix "-") .Values.controller.serviceAccount.name -}}
 {{- end }}
 
 {{- define "controller.image" -}}

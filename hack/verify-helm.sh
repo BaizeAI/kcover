@@ -37,7 +37,15 @@ assert_count() {
 
 helm lint "${chart}"
 
-helm template kcover "${chart}" >"${workdir}/default.yaml"
+if helm template kcover "${chart}" --kube-version 1.24.0 >"${workdir}/unsupported-kubernetes.yaml" 2>&1; then
+  fail "chart unexpectedly rendered for unsupported Kubernetes 1.24"
+fi
+
+helm show crds "${chart}" >"${workdir}/crds.yaml"
+assert_contains "${workdir}/crds.yaml" 'kind: CustomResourceDefinition'
+assert_contains "${workdir}/crds.yaml" 'name: preflightreports.kcover.io'
+
+helm template kcover "${chart}" --kube-version 1.25.0 >"${workdir}/default.yaml"
 assert_count "${workdir}/default.yaml" '^kind: ServiceAccount$' 2
 assert_contains "${workdir}/default.yaml" 'serviceAccountName: kcover-agent'
 assert_contains "${workdir}/default.yaml" 'serviceAccountName: kcover-controller'
@@ -45,26 +53,30 @@ assert_contains "${workdir}/default.yaml" 'privileged: false'
 assert_not_contains "${workdir}/default.yaml" 'verbs: ["*"]'
 
 helm template kcover "${chart}" \
+  --kube-version 1.25.0 \
   --set agent.flavor=metax >"${workdir}/metax.yaml"
 assert_contains "${workdir}/metax.yaml" 'image: ghcr.io/baizeai/kcover-agent-metax:'
 assert_contains "${workdir}/metax.yaml" 'mountPath: /dev/infiniband'
 assert_contains "${workdir}/metax.yaml" 'privileged: true'
 
 helm template kcover "${chart}" \
+  --kube-version 1.25.0 \
   --set agent.flavor=metax \
   --set agent.flavors.metax.securityContext.privileged=false >"${workdir}/metax-unprivileged.yaml"
 assert_contains "${workdir}/metax-unprivileged.yaml" 'privileged: false'
 
 helm template kcover "${chart}" \
-  --set agent.serviceAccount.name=external-agent \
-  --set controller.serviceAccount.name=external-controller >"${workdir}/custom-serviceaccounts.yaml"
+  --kube-version 1.25.0 \
+  --set agent.serviceAccount.name=custom-agent \
+  --set controller.serviceAccount.name=custom-controller >"${workdir}/custom-serviceaccounts.yaml"
 assert_count "${workdir}/custom-serviceaccounts.yaml" '^kind: ServiceAccount$' 2
-assert_contains "${workdir}/custom-serviceaccounts.yaml" 'serviceAccountName: external-agent'
-assert_contains "${workdir}/custom-serviceaccounts.yaml" 'serviceAccountName: external-controller'
-assert_contains "${workdir}/custom-serviceaccounts.yaml" 'name: external-agent'
-assert_contains "${workdir}/custom-serviceaccounts.yaml" 'name: external-controller'
+assert_contains "${workdir}/custom-serviceaccounts.yaml" 'serviceAccountName: custom-agent'
+assert_contains "${workdir}/custom-serviceaccounts.yaml" 'serviceAccountName: custom-controller'
+assert_contains "${workdir}/custom-serviceaccounts.yaml" 'name: custom-agent'
+assert_contains "${workdir}/custom-serviceaccounts.yaml" 'name: custom-controller'
 
 helm template kcover "${chart}" \
+  --kube-version 1.25.0 \
   --set controller.leaderElection.enabled=false >"${workdir}/leader-election-disabled.yaml"
 assert_contains "${workdir}/leader-election-disabled.yaml" '--leader-elect=false'
 

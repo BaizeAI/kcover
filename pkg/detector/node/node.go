@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	config "github.com/baizeai/kcover/pkg/agentconfig"
-	detectorpkg "github.com/baizeai/kcover/pkg/detector"
+	d "github.com/baizeai/kcover/pkg/detector"
 	"github.com/baizeai/kcover/pkg/events"
 	"github.com/baizeai/kcover/pkg/runner"
 
@@ -17,7 +17,7 @@ var _ runner.Runner = (*detector)(nil)
 
 type detector struct {
 	eventSink events.Sink
-	detector  detectorpkg.Detector
+	detector  d.Detector
 }
 
 func NewDetector(nodeName string, cfg config.Agent, client kubernetes.Interface, sink events.Sink) (runner.Runner, error) {
