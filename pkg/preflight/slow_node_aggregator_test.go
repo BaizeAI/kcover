@@ -290,9 +290,9 @@ func TestIntersectFailedNodeIPsReturnsSharedNodeAcrossAllFailedBatches(t *testin
 	t.Parallel()
 
 	failedByBatch := map[batchIndex]nodeIPSet{
-		batchIndex(0): nodeIPSet{nodeIP("node-c"): {}, nodeIP("node-d"): {}},
-		batchIndex(1): nodeIPSet{nodeIP("node-a"): {}, nodeIP("node-c"): {}},
-		batchIndex(2): nodeIPSet{nodeIP("node-b"): {}, nodeIP("node-c"): {}},
+		batchIndex(0): {nodeIP("node-c"): {}, nodeIP("node-d"): {}},
+		batchIndex(1): {nodeIP("node-a"): {}, nodeIP("node-c"): {}},
+		batchIndex(2): {nodeIP("node-b"): {}, nodeIP("node-c"): {}},
 	}
 
 	actual := intersectFailedNodeIPs(failedByBatch, nil)
@@ -314,9 +314,9 @@ func TestIntersectFailedNodeIPsResolvesNodeNames(t *testing.T) {
 	t.Parallel()
 
 	failedByBatch := map[batchIndex]nodeIPSet{
-		batchIndex(0): nodeIPSet{nodeIP("10.0.0.1"): {}, nodeIP("10.0.0.2"): {}},
-		batchIndex(1): nodeIPSet{nodeIP("10.0.0.1"): {}, nodeIP("10.0.0.3"): {}},
-		batchIndex(2): nodeIPSet{nodeIP("10.0.0.1"): {}, nodeIP("10.0.0.4"): {}},
+		batchIndex(0): {nodeIP("10.0.0.1"): {}, nodeIP("10.0.0.2"): {}},
+		batchIndex(1): {nodeIP("10.0.0.1"): {}, nodeIP("10.0.0.3"): {}},
+		batchIndex(2): {nodeIP("10.0.0.1"): {}, nodeIP("10.0.0.4"): {}},
 	}
 	nodeIPToName := map[nodeIP]nodeName{
 		nodeIP("10.0.0.1"): nodeName("node-a"),

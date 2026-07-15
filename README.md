@@ -124,9 +124,10 @@ mounted configuration file. Business settings such as `interval` are always
 read from the config file. MetaX-specific settings are parsed only by the
 `kcover-agent-metax` image.
 
-The chart always renders the same inline config structure under
-`agent.config.data`. The generic image ignores the optional `metaX` block,
-while the MetaX image consumes it.
+The chart renders common inline settings from `agent.config.data`. When
+`agent.flavor=metax`, it also injects the required MetaX defaults from
+`agent.flavors.metax.config`; values explicitly set in `agent.config.data`
+override those defaults. The base flavor does not render a `metaX` block.
 
 The chart uses `agent.flavor` to choose the agent image flavor. The default is
 `base`, which selects the generic image. Setting `agent.flavor=metax` selects
@@ -196,7 +197,7 @@ helm upgrade kcover baizeai/kcover \
   --namespace kcover-system \
   --reuse-values \
   --set agent.flavor=metax \
-  --set-json 'agent.config.data.metaX.hcaIDs=["mlx5_0","mlx5_1"]'
+  --set-json 'agent.flavors.metax.config.metaX.hcaIDs=["mlx5_0","mlx5_1"]'
 ```
 
 Example MetaX-specific config:
@@ -207,14 +208,17 @@ agent:
   config:
     data:
       interval: 5
-      metaX:
-        hcaIDs:
-          - mlx5_0
-          - mlx5_1
-        day2CheckTime: "10:00"
-        gpuNum: 8
-        temperature: 85
-        eccMaxCount: 64
+  flavors:
+    metax:
+      config:
+        metaX:
+          hcaIDs:
+            - mlx5_0
+            - mlx5_1
+          day2CheckTime: "10:00"
+          gpuNum: 8
+          temperature: 85
+          eccMaxCount: 64
 ```
 
 If `metaX.hcaIDs` is set, the agent runs `ibv_devinfo` and requires every

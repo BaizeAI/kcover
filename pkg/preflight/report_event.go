@@ -45,6 +45,7 @@ func LoadReportPayload(baseDir, namespace, reportName string) (string, string, e
 func ObservationEvent(report *kcoverv1alpha1.PreflightReport) events.Event {
 	annotations := map[string]string{
 		constants.PreflightWorkloadAnnotation: report.Spec.WorkloadName,
+		constants.PreflightReportAnnotation:   report.Name,
 	}
 
 	return events.Event{
@@ -52,7 +53,7 @@ func ObservationEvent(report *kcoverv1alpha1.PreflightReport) events.Event {
 		Namespace:    report.Namespace,
 		Name:         report.Spec.NodeName,
 		Annotations:  annotations,
-		Message:      fmt.Sprintf("preflight report received for workload %s on node %s", report.Spec.WorkloadName, report.Spec.NodeName),
+		Message:      fmt.Sprintf("preflight report %s received for workload %s on node %s", report.Name, report.Spec.WorkloadName, report.Spec.NodeName),
 	}
 }
 

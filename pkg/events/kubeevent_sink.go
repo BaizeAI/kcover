@@ -124,13 +124,17 @@ func (sink *KubeEventSink) recordPreflightEvent(ref *corev1.ObjectReference, eve
 	if err != nil {
 		return fmt.Errorf("create preflight event for %s: %w", ref.Name, err)
 	}
-	klog.V(3).InfoS("record preflight event", "eventNamespace", evt.Namespace, "involvedName", ref.Name, "reason", evt.Reason, "workload", event.Annotations[constants.PreflightWorkloadAnnotation])
+	klog.V(3).InfoS("record preflight event", "eventNamespace", evt.Namespace, "involvedName", ref.Name, "reason", evt.Reason, "workload", event.Annotations[constants.PreflightWorkloadAnnotation], "report", event.Annotations[constants.PreflightReportAnnotation])
 
 	return nil
 }
 
 func preflightEventMessage(event Event) string {
 	workload := event.Annotations[constants.PreflightWorkloadAnnotation]
+	report := event.Annotations[constants.PreflightReportAnnotation]
+	if report != "" && workload != "" {
+		return fmt.Sprintf("preflight report(%s) available for workload(%s) on node(%s)", report, workload, event.Name)
+	}
 	if workload == "" {
 		return fmt.Sprintf("preflight report available for node(%s)", event.Name)
 	}

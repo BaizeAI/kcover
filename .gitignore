@@ -36,3 +36,9 @@ bin
 # Temporary files
 temp/
 tmp/
+
+# Local preflight report debugging
+cmd/agent/preflight_report_debug.go
+cmd/agent/preflight_report_debug_test.go
+cmd/agent/report.json
+cmd/agent/report-worker01.json

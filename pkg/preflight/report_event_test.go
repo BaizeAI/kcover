@@ -2,6 +2,7 @@ package preflight
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -174,7 +175,10 @@ func TestReportToEvent(t *testing.T) {
 	if event.Annotations[constants.PreflightWorkloadAnnotation] != "job-a" {
 		t.Fatalf("workload annotation = %q, want %q", event.Annotations[constants.PreflightWorkloadAnnotation], "job-a")
 	}
-	if event.Message != "preflight report received for workload job-a on node node-a" {
+	if event.Annotations[constants.PreflightReportAnnotation] != report.Name {
+		t.Fatalf("report annotation = %q, want %q", event.Annotations[constants.PreflightReportAnnotation], report.Name)
+	}
+	if event.Message != fmt.Sprintf("preflight report %s received for workload job-a on node node-a", report.Name) {
 		t.Fatalf("event.Message = %q, want human-readable observation", event.Message)
 	}
 	if event.EventType != 0 {

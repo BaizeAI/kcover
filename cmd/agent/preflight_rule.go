@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	kcoverv1alpha1 "github.com/baizeai/kcover/pkg/apis/kcover/v1alpha1"
+	kcoverv1a1 "github.com/baizeai/kcover/pkg/apis/kcover/v1alpha1"
 	"github.com/baizeai/kcover/pkg/constants"
 	"github.com/baizeai/kcover/pkg/events"
 	"github.com/baizeai/kcover/pkg/podobserver"
@@ -26,7 +26,7 @@ const preflightInitContainerName = "preflight"
 // reportSubmitter is the collector's output port. Submit only means that the
 // report was accepted for delivery; persistence is the publisher's concern.
 type reportSubmitter interface {
-	Submit(*kcoverv1alpha1.PreflightReport) error
+	Submit(*kcoverv1a1.PreflightReport) error
 }
 
 // preflightRule recognizes completed preflight Pods, loads their node-local
@@ -46,10 +46,12 @@ func newReportCollector(cli kubernetes.Interface, eventSink events.Sink, reports
 	if reports == nil {
 		return nil, fmt.Errorf("preflight report submitter cannot be nil")
 	}
-	collector, err := podobserver.NewForNode(cli, eventSink, "report collector", nodeName, preflightRule{
+
+	rule := preflightRule{
 		baseDir: preflightReportDir,
 		reports: reports,
-	})
+	}
+	collector, err := podobserver.NewForNode(cli, eventSink, "report collector", nodeName, rule)
 	if err != nil {
 		return nil, fmt.Errorf("create report collector: %w", err)
 	}
@@ -88,7 +90,7 @@ func (r preflightRule) reconcile(pod *corev1.Pod) []events.Event {
 		return nil
 	}
 
-	reportText, nodeName, err := loadPreflightReportPayload(r.baseDir, pod.Namespace, reportName, nodeName)
+	reportText, nodeName, err := loadDebugPreflightReportPayload(r.baseDir, pod.Namespace, reportName, nodeName)
 	if err != nil {
 		klog.V(4).InfoS("failed to load preflight report", "namespace", pod.Namespace, "pod", pod.Name, "report", reportName, "node", nodeName, "error", err)
 		return nil

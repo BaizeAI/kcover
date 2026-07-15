@@ -11,8 +11,10 @@ const (
 	// PreflightWorkloadAnnotation carries the training or inference workload name
 	// associated with a preflight report event.
 	PreflightWorkloadAnnotation = "kcover.io/preflight-workload"
-	NodeNameEnv                 = "NODE_NAME"
-	LegacyNodeNameEnv           = "FAST_RECOVERY_NODE_NAME"
+	// PreflightReportAnnotation identifies the persisted PreflightReport resource.
+	PreflightReportAnnotation = "kcover.io/preflight-report"
+	NodeNameEnv               = "NODE_NAME"
+	LegacyNodeNameEnv         = "FAST_RECOVERY_NODE_NAME"
 	// recovery annotations
 	NeedRecoveryAnnotation = "kcover.io/need-recovery"
 	JobRestartLedgerName   = "kcover-recovery-ledger"

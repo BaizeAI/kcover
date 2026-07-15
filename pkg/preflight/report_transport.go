@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	kcoverv1a1 "github.com/baizeai/kcover/pkg/apis/kcover/v1alpha1"
@@ -24,6 +25,11 @@ import (
 var PreflightReportGVR = schema.GroupVersionResource{
 	Group: kcoverv1a1.Group, Version: kcoverv1a1.Version, Resource: "preflightreports",
 }
+
+const (
+	preflightReportHashBytes = 5
+	maxKubernetesNameLength  = 253
+)
 
 // ReportSink performs one persistence attempt for a PreflightReport. Retry,
 // concurrency, and lifecycle management belong to ReportPublisher.
@@ -65,10 +71,11 @@ func BuildPreflightReport(namespace, nodeName, workloadName, workloadUID, report
 	}
 	identity := reportIdentity(namespace, workloadUID, nodeName, report.Rank, reportText)
 	sum := sha256.Sum256([]byte(identity))
+	name := preflightReportName(workloadName, sum)
 
 	return &kcoverv1a1.PreflightReport{
 		TypeMeta:   metav1.TypeMeta{APIVersion: kcoverv1a1.Group + "/" + kcoverv1a1.Version, Kind: "PreflightReport"},
-		ObjectMeta: metav1.ObjectMeta{Name: "preflight-" + hex.EncodeToString(sum[:20]), Namespace: namespace, OwnerReferences: owners},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, OwnerReferences: owners},
 		Spec: kcoverv1a1.PreflightReportSpec{
 			WorkloadName: workloadName,
 			WorkloadUID:  workloadUID,
@@ -78,6 +85,33 @@ func BuildPreflightReport(namespace, nodeName, workloadName, workloadUID, report
 			ObservedAt:   metav1.NewTime(observedAt.UTC()),
 		},
 	}, nil
+}
+
+func preflightReportName(workloadName string, sum [sha256.Size]byte) string {
+	hash := hex.EncodeToString(sum[:preflightReportHashBytes])
+	workload := namePart(workloadName)
+	maxWorkloadLength := maxKubernetesNameLength - len(hash) - 1
+	if len(workload) > maxWorkloadLength {
+		workload = strings.TrimRight(workload[:maxWorkloadLength], "-.")
+	}
+	return workload + "-" + hash
+}
+
+func namePart(value string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(value) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	part := strings.Trim(b.String(), "-.")
+	if part == "" {
+		return "unknown"
+	}
+	return part
 }
 
 func (s *KubeReportSink) WriteReport(report *kcoverv1a1.PreflightReport) (bool, error) {

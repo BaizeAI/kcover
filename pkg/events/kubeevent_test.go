@@ -27,6 +27,7 @@ func TestRecordEventDoesNotStorePreflightPayload(t *testing.T) {
 		Message:      payload,
 		Annotations: map[string]string{
 			constants.PreflightWorkloadAnnotation: "job-a",
+			constants.PreflightReportAnnotation:   "job-a-a1b2c3d4e5",
 		},
 	})
 	if err != nil {
@@ -47,11 +48,11 @@ func TestRecordEventDoesNotStorePreflightPayload(t *testing.T) {
 	if stored.Reason != preflightEventReason {
 		t.Fatalf("event reason = %q, want %q", stored.Reason, preflightEventReason)
 	}
-	if stored.Message != "preflight report available for workload(job-a) on node(node-a)" {
-		t.Fatalf("event message = %q, want %q", stored.Message, "preflight report available for workload(job-a) on node(node-a)")
+	if stored.Message != "preflight report(job-a-a1b2c3d4e5) available for workload(job-a) on node(node-a)" {
+		t.Fatalf("event message = %q, want report, workload, and node", stored.Message)
 	}
-	if len(stored.Annotations) != 1 || stored.Annotations[constants.PreflightWorkloadAnnotation] != "job-a" {
-		t.Fatalf("event annotations = %v, want workload observation only", stored.Annotations)
+	if len(stored.Annotations) != 2 || stored.Annotations[constants.PreflightWorkloadAnnotation] != "job-a" || stored.Annotations[constants.PreflightReportAnnotation] != "job-a-a1b2c3d4e5" {
+		t.Fatalf("event annotations = %v, want workload and report identity", stored.Annotations)
 	}
 	if stored.InvolvedObject.Namespace != stored.Namespace {
 		t.Fatalf("involved object namespace = %q, want %q", stored.InvolvedObject.Namespace, stored.Namespace)

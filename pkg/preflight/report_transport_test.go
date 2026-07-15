@@ -3,6 +3,7 @@ package preflight
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	clienttesting "k8s.io/client-go/testing"
 )
@@ -36,6 +38,9 @@ func TestBuildPreflightReportUsesDeterministicNameAndOwner(t *testing.T) {
 	if first.Name == "" || first.Name != second.Name {
 		t.Fatalf("delivery names = %q, %q, want same non-empty name", first.Name, second.Name)
 	}
+	if !strings.HasPrefix(first.Name, "job-a-") {
+		t.Fatalf("delivery name = %q, want readable workload prefix", first.Name)
+	}
 	differentRun, err := BuildPreflightReport("train-ns", "node-a", "job-a", "new-job-uid", transportTestPayload, observedAt, owner)
 	if err != nil {
 		t.Fatalf("BuildPreflightReport() for different workload UID error = %v", err)
@@ -48,6 +53,22 @@ func TestBuildPreflightReportUsesDeterministicNameAndOwner(t *testing.T) {
 	}
 	if first.Spec.WorkloadUID != "job-uid" || first.Spec.Rank != 0 || !first.Spec.ObservedAt.Time.Equal(observedAt) {
 		t.Fatalf("report = %+v, want rank 0 and observedAt", first)
+	}
+}
+
+func TestBuildPreflightReportNameIsValidAndBounded(t *testing.T) {
+	t.Parallel()
+
+	longWorkloadName := strings.Repeat("Workload_Name-测试", 30)
+	report, err := BuildPreflightReport("train-ns", "Node_A", longWorkloadName, "job-uid", transportTestPayload, time.Unix(100, 0))
+	if err != nil {
+		t.Fatalf("BuildPreflightReport() error = %v", err)
+	}
+	if len(report.Name) > 253 {
+		t.Fatalf("delivery name length = %d, want <= 253", len(report.Name))
+	}
+	if errors := validation.IsDNS1123Subdomain(report.Name); len(errors) != 0 {
+		t.Fatalf("delivery name = %q, want valid DNS subdomain: %v", report.Name, errors)
 	}
 }
 

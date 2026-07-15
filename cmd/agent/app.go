@@ -62,6 +62,8 @@ func (a *agentApp) Start(ctx context.Context) error {
 		return fmt.Errorf("start preflight report publisher: %w", err)
 	}
 
+	//TODO: trigger debug?
+
 	if err := a.nodeDetector.Start(ctx); err != nil {
 		a.reportPublisher.Stop()
 		return fmt.Errorf("start node detector: %w", err)
