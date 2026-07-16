@@ -52,7 +52,10 @@ type workloadPlan struct {
 	batchCount  int
 }
 
-const maxBatchCount = 5
+const (
+	maxBatchCount   = 5
+	maxWorkloadSize = 10_000
+)
 
 type WorkloadTimeoutError struct {
 	Namespace       string

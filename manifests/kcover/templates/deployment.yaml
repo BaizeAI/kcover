@@ -49,13 +49,16 @@ spec:
             - --leader-elect={{ .Values.controller.leaderElection.enabled }}
           {{- end }}
           env:
-            # NODE_NAME is the canonical env var. FAST_RECOVERY_NODE_NAME remains
-            # backward-compatible in code for older deployments during migration.
             - name: NODE_NAME
               valueFrom:
                 fieldRef:
                   apiVersion: v1
                   fieldPath: spec.nodeName
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
           resources:
             {{- toYaml .Values.controller.resources | nindent 12 }}
           securityContext:

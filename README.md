@@ -107,11 +107,10 @@ kubectl label pytorchjobs <job-name> kcover.io/cascading-recovery=true
 kubectl label pytorchjobs <job-name> kcover.io/need-recovery=true
 ```
 
-`kcover` and `agent` read the current node name from the `NODE_NAME`
-environment variable. Helm templates inject this automatically from
-`spec.nodeName`. The legacy `FAST_RECOVERY_NODE_NAME` variable is still read in
-code for backward compatibility during migration, but new deployments should use
-`NODE_NAME` only.
+Helm injects the current node name from `spec.nodeName` into both the agent and
+controller as `NODE_NAME`. The agent also supports the legacy
+`FAST_RECOVERY_NODE_NAME` variable during migration. The controller separately
+uses the Pod name from `POD_NAME` as its unique leader-election identity.
 
 ## Agent Config
 
@@ -120,9 +119,9 @@ from a ConfigMap. The Helm chart creates a default ConfigMap automatically, and
 you can also point the agent to an existing user-managed ConfigMap.
 
 The only runtime flag kept by the agent is `--config`, which points to the
-mounted configuration file. Business settings such as `interval` are always
-read from the config file. MetaX-specific settings are parsed only by the
-`kcover-agent-metax` image.
+mounted configuration file. MetaX-specific settings are parsed only by the
+`kcover-agent-metax` image. The legacy `interval` field remains accepted for
+configuration compatibility, but no current detector uses it for scheduling.
 
 The chart renders common inline settings from `agent.config.data`. When
 `agent.flavor=metax`, it also injects the required MetaX defaults from
@@ -140,8 +139,7 @@ Default chart-managed config:
 ```yaml
 agent:
   config:
-    data:
-      interval: 5
+    data: {}
 ```
 
 `kcover-agent` is the default generic image and should also be treated as the
@@ -205,9 +203,6 @@ Example MetaX-specific config:
 ```yaml
 agent:
   flavor: metax
-  config:
-    data:
-      interval: 5
   flavors:
     metax:
       config:

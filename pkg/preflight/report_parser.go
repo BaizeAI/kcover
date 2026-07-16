@@ -271,23 +271,29 @@ func resolveNodeName(nodeIPToName map[nodeIP]nodeName, ip nodeIP) string {
 }
 
 func buildWorkloadPlan(workloadSize int) (workloadPlan, error) {
-	plan := workloadPlan{}
-	if workloadSize <= 0 {
-		return workloadPlan{}, fmt.Errorf("cannot resolve preflight layout without workload_size")
-	}
-	if workloadSize%2 != 0 {
-		return workloadPlan{}, fmt.Errorf("odd workload sizes are not supported: workload_size=%d", workloadSize)
-	}
-	plan.reportCount = workloadSize
-	plan.batchCount = min(workloadSize-1, maxBatchCount)
-	if plan.reportCount <= 1 {
-		return workloadPlan{}, fmt.Errorf("invalid expected report count: %d", plan.reportCount)
-	}
-	if plan.batchCount <= 0 {
-		return workloadPlan{}, fmt.Errorf("invalid expected batch count: %d", plan.batchCount)
+	if err := validateWorkloadSize(workloadSize); err != nil {
+		return workloadPlan{}, err
 	}
 
+	plan := workloadPlan{
+		reportCount: workloadSize,
+		batchCount:  min(workloadSize-1, maxBatchCount),
+	}
 	return plan, nil
+}
+
+func validateWorkloadSize(workloadSize int) error {
+	if workloadSize <= 0 {
+		return fmt.Errorf("cannot resolve preflight layout without workload_size")
+	}
+	if workloadSize > maxWorkloadSize {
+		return fmt.Errorf("workload_size %d exceeds maximum %d", workloadSize, maxWorkloadSize)
+	}
+	if workloadSize%2 != 0 {
+		return fmt.Errorf("odd workload sizes are not supported: workload_size=%d", workloadSize)
+	}
+
+	return nil
 }
 
 func intField(v any) (int, error) {

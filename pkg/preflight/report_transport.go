@@ -66,6 +66,15 @@ func BuildPreflightReport(namespace, nodeName, workloadName, workloadUID, report
 	if err != nil {
 		return nil, fmt.Errorf("parse preflight report: %w", err)
 	}
+	if report.NodeName != nodeName {
+		return nil, fmt.Errorf("preflight report node %q does not match pod node %q", report.NodeName, nodeName)
+	}
+	if report.Rank < 0 || int64(report.Rank) > int64(1<<31-1) {
+		return nil, fmt.Errorf("preflight report rank %d is outside int32 range", report.Rank)
+	}
+	if err := validateWorkloadSize(report.WorkloadSize); err != nil {
+		return nil, fmt.Errorf("invalid preflight workload layout: %w", err)
+	}
 	if observedAt.IsZero() {
 		return nil, fmt.Errorf("preflight observation time is empty")
 	}
@@ -244,6 +253,9 @@ func validateReport(report *kcoverv1a1.PreflightReport) error {
 	payload, err := parseReport(report.Spec.Report)
 	if err != nil {
 		return fmt.Errorf("spec.report is invalid: %w", err)
+	}
+	if err := validateWorkloadSize(payload.WorkloadSize); err != nil {
+		return fmt.Errorf("spec.report workload layout is invalid: %w", err)
 	}
 	if payload.NodeName != report.Spec.NodeName {
 		return fmt.Errorf("spec.nodeName %q does not match payload node_name %q", report.Spec.NodeName, payload.NodeName)

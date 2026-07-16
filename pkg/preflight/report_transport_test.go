@@ -60,7 +60,7 @@ func TestBuildPreflightReportNameIsValidAndBounded(t *testing.T) {
 	t.Parallel()
 
 	longWorkloadName := strings.Repeat("Workload_Name-测试", 30)
-	report, err := BuildPreflightReport("train-ns", "Node_A", longWorkloadName, "job-uid", transportTestPayload, time.Unix(100, 0))
+	report, err := BuildPreflightReport("train-ns", "node-a", longWorkloadName, "job-uid", transportTestPayload, time.Unix(100, 0))
 	if err != nil {
 		t.Fatalf("BuildPreflightReport() error = %v", err)
 	}
@@ -69,6 +69,24 @@ func TestBuildPreflightReportNameIsValidAndBounded(t *testing.T) {
 	}
 	if errors := validation.IsDNS1123Subdomain(report.Name); len(errors) != 0 {
 		t.Fatalf("delivery name = %q, want valid DNS subdomain: %v", report.Name, errors)
+	}
+}
+
+func TestBuildPreflightReportRejectsInvalidSourceIdentityAndSize(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]string{
+		"node mismatch":    `{"workload_size":2,"rank":0,"node_name":"node-b"}`,
+		"negative rank":    `{"workload_size":2,"rank":-1,"node_name":"node-a"}`,
+		"oversized layout": `{"workload_size":10002,"rank":0,"node_name":"node-a"}`,
+	}
+	for name, payload := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := BuildPreflightReport("train-ns", "node-a", "job-a", "job-uid", payload, time.Unix(100, 0)); err == nil {
+				t.Fatal("BuildPreflightReport() error = nil, want invalid report rejected")
+			}
+		})
 	}
 }
 
@@ -174,6 +192,9 @@ func TestReportFromObjectRejectsInvalidPayloadAndMetadataMismatch(t *testing.T) 
 		},
 		"workload mismatch": func(report *kcoverv1alpha1.PreflightReport) {
 			report.Spec.Report = `{"workload":"other-job","workload_size":2,"rank":0,"node_name":"node-a","node_ip":"10.0.0.1","gpu_check":1,"storage_check":1,"batches":[]}`
+		},
+		"oversized workload": func(report *kcoverv1alpha1.PreflightReport) {
+			report.Spec.Report = `{"workload_size":10002,"rank":0,"node_name":"node-a","node_ip":"10.0.0.1","gpu_check":1,"storage_check":1,"batches":[]}`
 		},
 	}
 	for name, mutate := range tests {

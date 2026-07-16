@@ -8,12 +8,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/baizeai/kcover/pkg/detector/pod"
-	"github.com/baizeai/kcover/pkg/events"
 	"github.com/baizeai/kcover/pkg/kube"
 	"github.com/baizeai/kcover/pkg/preflight"
 	"github.com/baizeai/kcover/pkg/recovery"
-	"github.com/baizeai/kcover/pkg/runner"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
@@ -52,9 +49,11 @@ type controllerConfig struct {
 	leaderElectionEnabled   bool
 }
 
-func mustHostName() string {
-	if nodeName := kube.NodeNameFromEnv(); nodeName != "" {
-		return nodeName
+const podNameEnv = "POD_NAME"
+
+func mustControllerIdentity() string {
+	if podName := os.Getenv(podNameEnv); podName != "" {
+		return podName
 	}
 
 	hn, err := os.Hostname()
@@ -63,7 +62,8 @@ func mustHostName() string {
 	}
 	return hn
 }
-func lock(hostName string) *resourcelock.LeaseLock {
+
+func lock(identity string) *resourcelock.LeaseLock {
 	return &resourcelock.LeaseLock{
 		Client: coordv1.NewForConfigOrDie(kube.GetK8sConfigConfigWithFile("", "")),
 		LeaseMeta: metav1.ObjectMeta{
@@ -71,7 +71,7 @@ func lock(hostName string) *resourcelock.LeaseLock {
 			Namespace: kube.CurrentNamespace(),
 		},
 		LockConfig: resourcelock.ResourceLockConfig{
-			Identity: hostName,
+			Identity: identity,
 		},
 	}
 }
@@ -80,50 +80,20 @@ func makeElectionCallback(reportCollectionTimeout, sweepInterval time.Duration) 
 	cfg := kube.GetK8sConfigConfigWithFile("", "")
 	cli := kubernetes.NewForConfigOrDie(cfg)
 	dynCli := dynamic.NewForConfigOrDie(cfg)
-
-	var (
-		recov         runner.Runner
-		detector      runner.Runner
-		evtTransport  *events.KubeEventTransport
-		reportWatcher *preflight.KubeReportWatcher
-	)
+	app := newControllerApp(cli, dynCli, reportCollectionTimeout, sweepInterval)
 
 	return func(ctx context.Context) {
-			// 当前实例成为 leader 时，开始执行 controller 逻辑
-			var err error
-			evtTransport = events.NewKubeEventTransport(cli)
-			reportWatcher = preflight.NewKubeReportWatcher(dynCli)
-			recov = recovery.NewController(
-				cli,
-				evtTransport,
-				reportWatcher.Reports(),
-				reportCollectionTimeout,
-				sweepInterval,
-			)
-			detector, err = pod.NewDetector(cli, evtTransport)
-			if err != nil {
+			if err := app.Start(ctx); err != nil {
+				if ctx.Err() != nil {
+					klog.InfoS("controller startup canceled", "error", err)
+					return
+				}
 				panic(err)
 			}
-			if err := recov.Start(ctx); err != nil {
-				panic(err)
-			}
-			if err := detector.Start(ctx); err != nil {
-				panic(err)
-			}
-			if err := evtTransport.Start(ctx); err != nil {
-				panic(err)
-			}
-			if err := reportWatcher.Start(ctx); err != nil {
-				panic(err)
-			}
-
 			klog.InfoS("kcover started")
 		},
 		func() {
-			detector.Stop()
-			reportWatcher.Stop()
-			evtTransport.Stop()
-			recov.Stop()
+			app.Stop()
 			klog.InfoS("kcover stopped")
 		}
 }
@@ -138,7 +108,7 @@ func runtimeConfig() controllerConfig {
 
 func leaderElectionConfig(started func(context.Context), stopped func()) leaderelection.LeaderElectionConfig {
 	return leaderelection.LeaderElectionConfig{
-		Lock:            lock(mustHostName()),
+		Lock:            lock(mustControllerIdentity()),
 		ReleaseOnCancel: true,
 		LeaseDuration:   15 * time.Second,
 		RenewDeadline:   10 * time.Second,

@@ -49,6 +49,10 @@ helm template kcover "${chart}" --kube-version 1.25.0 >"${workdir}/default.yaml"
 assert_count "${workdir}/default.yaml" '^kind: ServiceAccount$' 2
 assert_contains "${workdir}/default.yaml" 'serviceAccountName: kcover-agent'
 assert_contains "${workdir}/default.yaml" 'serviceAccountName: kcover-controller'
+assert_contains "${workdir}/default.yaml" 'name: POD_NAME'
+assert_contains "${workdir}/default.yaml" 'name: NODE_NAME'
+assert_contains "${workdir}/default.yaml" 'fieldPath: metadata.name'
+assert_contains "${workdir}/default.yaml" 'fieldPath: spec.nodeName'
 assert_contains "${workdir}/default.yaml" 'privileged: false'
 assert_not_contains "${workdir}/default.yaml" 'verbs: ["*"]'
 

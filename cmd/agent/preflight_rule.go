@@ -90,13 +90,13 @@ func (r preflightRule) reconcile(pod *corev1.Pod) []events.Event {
 		return nil
 	}
 
-	reportText, nodeName, err := loadDebugPreflightReportPayload(r.baseDir, pod.Namespace, reportName, nodeName)
+	reportText, reportNodeName, err := loadPreflightReportPayload(r.baseDir, pod.Namespace, reportName, nodeName)
 	if err != nil {
 		klog.V(4).InfoS("failed to load preflight report", "namespace", pod.Namespace, "pod", pod.Name, "report", reportName, "node", nodeName, "error", err)
 		return nil
 	}
-	if nodeName == "" {
-		klog.ErrorS(nil, "preflight report node name is empty", "namespace", pod.Namespace, "pod", pod.Name, "report", reportName)
+	if reportNodeName != nodeName {
+		klog.ErrorS(nil, "preflight report node does not match pod node", "namespace", pod.Namespace, "pod", pod.Name, "report", reportName, "podNode", nodeName, "reportNode", reportNodeName)
 		return nil
 	}
 

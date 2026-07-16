@@ -633,6 +633,15 @@ func TestExtractNodeReportRejectsOddWorkloadSize(t *testing.T) {
 	}
 }
 
+func TestExtractNodeReportRejectsOversizedWorkload(t *testing.T) {
+	t.Parallel()
+
+	report := fmt.Sprintf(`{"workload_size":%d,"rank":0,"node_name":"node-a"}`, maxWorkloadSize+2)
+	if _, _, _, err := extractNodeReport(report); err == nil {
+		t.Fatal("extractNodeReport() error = nil, want oversized workload rejected")
+	}
+}
+
 func TestExtractNodeReportSupportsSuccessfulReportWithSelfIP(t *testing.T) {
 	t.Parallel()
 

@@ -13,6 +13,8 @@ const (
 )
 
 type Agent struct {
+	// Interval is retained for backward-compatible config parsing. Detector
+	// scheduling is controlled by flavor-specific settings.
 	Interval int          `yaml:"interval"`
 	Flavor   FlavorConfig `yaml:",inline"`
 }

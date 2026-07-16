@@ -28,8 +28,7 @@ agent:
   config:
     existingConfigMap: "" # 留空时自动创建；设置后直接挂载用户自定义 ConfigMap
     path: /etc/kcover-agent/config.yaml
-    data:
-      interval: 5 # 以秒为单位的诊断间隔
+    data: {}
 
   image:
     registry: ''

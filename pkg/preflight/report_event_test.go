@@ -161,7 +161,7 @@ func TestReportPath(t *testing.T) {
 func TestReportToEvent(t *testing.T) {
 	t.Parallel()
 
-	report, err := BuildPreflightReport("default", "node-a", "job-a", "job-uid", `{"version":1,"rank":0,"node_name":"node-a"}`, time.Unix(100, 0))
+	report, err := BuildPreflightReport("default", "node-a", "job-a", "job-uid", `{"version":1,"workload_size":2,"rank":0,"node_name":"node-a"}`, time.Unix(100, 0))
 	if err != nil {
 		t.Fatalf("BuildPreflightReport() error = %v", err)
 	}
