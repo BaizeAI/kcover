@@ -58,6 +58,87 @@ assert_not_contains "${workdir}/default.yaml" 'verbs: ["*"]'
 
 helm template kcover "${chart}" \
   --kube-version 1.25.0 \
+  --show-only templates/daemonset.yaml >"${workdir}/default-agent.yaml"
+assert_not_contains "${workdir}/default-agent.yaml" 'nodeSelector:'
+assert_not_contains "${workdir}/default-agent.yaml" 'affinity:'
+assert_not_contains "${workdir}/default-agent.yaml" 'tolerations:'
+
+helm template kcover "${chart}" \
+  --kube-version 1.25.0 \
+  --show-only templates/deployment.yaml >"${workdir}/default-controller.yaml"
+assert_not_contains "${workdir}/default-controller.yaml" 'nodeSelector:'
+assert_not_contains "${workdir}/default-controller.yaml" 'affinity:'
+assert_not_contains "${workdir}/default-controller.yaml" 'tolerations:'
+
+cat >"${workdir}/workload-values.yaml" <<'EOF'
+agent:
+  podLabels:
+    app: intentionally-wrong-agent
+    test.kcover.io/agent-label: agent-value
+  nodeSelector:
+    test.kcover.io/agent-node: agent-pool
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: test.kcover.io/agent-affinity
+                operator: Exists
+  tolerations:
+    - key: test.kcover.io/agent-toleration
+      operator: Exists
+      effect: NoSchedule
+controller:
+  podLabels:
+    app: intentionally-wrong-controller
+    test.kcover.io/controller-label: controller-value
+  nodeSelector:
+    test.kcover.io/controller-node: controller-pool
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: test.kcover.io/controller-affinity
+                operator: Exists
+  tolerations:
+    - key: test.kcover.io/controller-toleration
+      operator: Exists
+      effect: NoSchedule
+EOF
+
+helm template kcover "${chart}" \
+  --kube-version 1.25.0 \
+  --values "${workdir}/workload-values.yaml" \
+  --show-only templates/daemonset.yaml >"${workdir}/custom-agent.yaml"
+assert_contains "${workdir}/custom-agent.yaml" 'test.kcover.io/agent-label: agent-value'
+assert_not_contains "${workdir}/custom-agent.yaml" 'intentionally-wrong-agent'
+assert_count "${workdir}/custom-agent.yaml" '^[[:space:]]+app: kcover-agent$' 2
+assert_contains "${workdir}/custom-agent.yaml" 'nodeSelector:'
+assert_contains "${workdir}/custom-agent.yaml" 'affinity:'
+assert_contains "${workdir}/custom-agent.yaml" 'tolerations:'
+assert_contains "${workdir}/custom-agent.yaml" 'test.kcover.io/agent-node: agent-pool'
+assert_contains "${workdir}/custom-agent.yaml" 'key: test.kcover.io/agent-affinity'
+assert_contains "${workdir}/custom-agent.yaml" 'key: test.kcover.io/agent-toleration'
+assert_not_contains "${workdir}/custom-agent.yaml" 'test.kcover.io/controller-'
+
+helm template kcover "${chart}" \
+  --kube-version 1.25.0 \
+  --values "${workdir}/workload-values.yaml" \
+  --show-only templates/deployment.yaml >"${workdir}/custom-controller.yaml"
+assert_contains "${workdir}/custom-controller.yaml" 'test.kcover.io/controller-label: controller-value'
+assert_not_contains "${workdir}/custom-controller.yaml" 'intentionally-wrong-controller'
+assert_count "${workdir}/custom-controller.yaml" '^[[:space:]]+app: kcover-controller$' 2
+assert_contains "${workdir}/custom-controller.yaml" 'nodeSelector:'
+assert_contains "${workdir}/custom-controller.yaml" 'affinity:'
+assert_contains "${workdir}/custom-controller.yaml" 'tolerations:'
+assert_contains "${workdir}/custom-controller.yaml" 'test.kcover.io/controller-node: controller-pool'
+assert_contains "${workdir}/custom-controller.yaml" 'key: test.kcover.io/controller-affinity'
+assert_contains "${workdir}/custom-controller.yaml" 'key: test.kcover.io/controller-toleration'
+assert_not_contains "${workdir}/custom-controller.yaml" 'test.kcover.io/agent-'
+
+helm template kcover "${chart}" \
+  --kube-version 1.25.0 \
   --set agent.flavor=metax >"${workdir}/metax.yaml"
 assert_contains "${workdir}/metax.yaml" 'image: ghcr.io/baizeai/kcover-agent-metax:'
 assert_contains "${workdir}/metax.yaml" 'mountPath: /dev/infiniband'

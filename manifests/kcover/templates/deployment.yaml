@@ -17,12 +17,14 @@ spec:
     type: RollingUpdate
   template:
     metadata:
+      {{- $podLabels := deepCopy (default dict .Values.controller.podLabels) }}
+      {{- $_ := set $podLabels "app" (printf "%s-controller" (include "kcover.fullname" .)) }}
       {{- with .Values.controller.podAnnotations }}
       annotations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       labels:
-        app: {{ include "kcover.fullname" . }}-controller
+        {{- toYaml $podLabels | nindent 8 }}
     spec:
       {{- with .Values.controller.imagePullSecrets }}
       imagePullSecrets:
@@ -31,6 +33,18 @@ spec:
       serviceAccountName: {{ include "kcover.controllerServiceAccountName" . }}
       securityContext:
         {{- toYaml .Values.controller.podSecurityContext | nindent 8 }}
+      {{- with .Values.controller.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controller.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controller.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: controller
           image: {{ template "controller.image" . }}
