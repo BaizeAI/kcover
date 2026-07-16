@@ -11,12 +11,14 @@ spec:
       app: {{ include "kcover.fullname" . }}-agent
   template:
     metadata:
+      {{- $podLabels := deepCopy (default dict .Values.agent.podLabels) }}
+      {{- $_ := set $podLabels "app" (printf "%s-agent" (include "kcover.fullname" .)) }}
       {{- with .Values.agent.podAnnotations }}
       annotations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       labels:
-        app: {{ include "kcover.fullname" . }}-agent
+        {{- toYaml $podLabels | nindent 8 }}
     spec:
       {{- with .Values.agent.imagePullSecrets }}
       imagePullSecrets:
@@ -25,6 +27,18 @@ spec:
       serviceAccountName: {{ include "kcover.agentServiceAccountName" . }}
       securityContext:
         {{- toYaml .Values.agent.podSecurityContext | nindent 8 }}
+      {{- with .Values.agent.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agent.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agent.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: agent
           securityContext:
