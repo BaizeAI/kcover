@@ -1,9 +1,6 @@
 package events
 
-import (
-	"github.com/baizeai/kcover/pkg/constants"
-	"github.com/baizeai/kcover/pkg/runner"
-)
+import "github.com/baizeai/kcover/pkg/constants"
 
 type ResourceType string
 
@@ -31,13 +28,6 @@ type Event struct {
 	Message string
 }
 
-type Bridge interface {
-	runner.Runner
-
-	Sink
-	Stream
-}
-
 type Sink interface {
 	RecordEvent(e Event) error
 }
@@ -48,17 +38,4 @@ type Stream interface {
 
 func IsPreflightEvent(annotations map[string]string) bool {
 	return annotations[constants.PreflightWorkloadAnnotation] != ""
-}
-
-func copyAnnotations(src map[string]string) map[string]string {
-	if len(src) == 0 {
-		return nil
-	}
-
-	dst := make(map[string]string, len(src))
-	for key, value := range src {
-		dst[key] = value
-	}
-
-	return dst
 }

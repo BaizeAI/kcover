@@ -5,6 +5,7 @@ FROM m.daocloud.io/docker.io/ubuntu:24.04
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends \
 		ibverbs-providers \
+		ibverbs-utils \
 		libibverbs1 \
 		libnl-3-200 \
 		libnl-route-3-200 \
@@ -12,4 +13,5 @@ RUN apt-get update \
 
 COPY --from=metax-tools /opt/mxdriver/bin/mx-smi /usr/local/bin/mx-smi
 
-RUN chmod +x /usr/local/bin/mx-smi /usr/local/bin/ibv_devinfo
+RUN ln -sf "$(command -v ibv_devinfo)" /usr/local/bin/ibv_devinfo \
+	&& chmod +x /usr/local/bin/mx-smi /usr/local/bin/ibv_devinfo

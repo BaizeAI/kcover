@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	kcoverv1alpha1 "github.com/baizeai/kcover/pkg/apis/kcover/v1alpha1"
 	"github.com/baizeai/kcover/pkg/constants"
 	"github.com/baizeai/kcover/pkg/events"
 )
@@ -41,50 +42,24 @@ func LoadReportPayload(baseDir, namespace, reportName string) (string, string, e
 	return payload, nodeName, nil
 }
 
-func BuildEventFromReport(namespace, nodeName, workloadName, reportText string) (events.Event, error) {
-	if workloadName == "" {
-		return events.Event{}, fmt.Errorf("preflight workload name is empty")
-	}
-
-	report, err := parseReport(reportText)
-	if err != nil {
-		return events.Event{}, fmt.Errorf("parse preflight report: %w", err)
-	}
-
-	return buildEventFromParsedReport(namespace, nodeName, workloadName, report, reportText), nil
-}
-
-func buildEventFromParsedReport(namespace, nodeName, workloadName string, report Report, reportText string) events.Event {
+func ObservationEvent(report *kcoverv1alpha1.PreflightReport) events.Event {
 	annotations := map[string]string{
-		constants.PreflightWorkloadAnnotation: workloadName,
-		constants.PreflightDedupKeyAnnotation: eventDedupKeyForReport(namespace, nodeName, workloadName, report, reportText),
+		constants.PreflightWorkloadAnnotation: report.Spec.WorkloadName,
+		constants.PreflightReportAnnotation:   report.Name,
 	}
 
 	return events.Event{
 		ResourceType: events.Node,
-		Namespace:    namespace,
-		Name:         nodeName,
+		Namespace:    report.Namespace,
+		Name:         report.Spec.NodeName,
 		Annotations:  annotations,
-		Message:      reportText,
+		Message:      fmt.Sprintf("preflight report %s received for workload %s on node %s", report.Name, report.Spec.WorkloadName, report.Spec.NodeName),
 	}
 }
 
-func EventDedupKey(namespace, nodeName, workloadName, reportText string) string {
-	report, err := parseReport(reportText)
-	if err != nil {
-		return eventDedupKey(namespace, nodeName, workloadName, 0, reportText)
-	}
-
-	return eventDedupKeyForReport(namespace, nodeName, workloadName, report, reportText)
-}
-
-func eventDedupKeyForReport(namespace, nodeName, workloadName string, report Report, reportText string) string {
-	return eventDedupKey(namespace, nodeName, workloadName, report.Rank, reportText)
-}
-
-func eventDedupKey(namespace, nodeName, workloadName string, rank int, reportText string) string {
+func reportIdentity(namespace, workloadUID, nodeName string, rank int, reportText string) string {
 	sum := sha256.Sum256([]byte(reportText))
-	return fmt.Sprintf("%s/%s/%s/%d/%s", namespace, workloadName, nodeName, rank, hex.EncodeToString(sum[:]))
+	return fmt.Sprintf("%s/%s/%s/%d/%s", namespace, workloadUID, nodeName, rank, hex.EncodeToString(sum[:]))
 }
 
 func CompactReport(reportText string) (string, string, error) {

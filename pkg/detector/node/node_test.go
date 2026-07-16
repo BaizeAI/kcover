@@ -1,9 +1,10 @@
 package node
 
 import (
+	"context"
 	"testing"
 
-	kcoverconfig "github.com/baizeai/kcover/cmd/agent/config"
+	kcoverconfig "github.com/baizeai/kcover/pkg/agentconfig"
 	"github.com/baizeai/kcover/pkg/events"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -17,35 +18,33 @@ func (stubSink) RecordEvent(events.Event) error {
 func TestNewDetectorRejectsNilSink(t *testing.T) {
 	t.Parallel()
 
-	if _, err := NewDetector("node-a", MetaX, 5, kcoverconfig.MetaX{}, fake.NewSimpleClientset(), nil); err == nil {
+	if _, err := NewDetector("node-a", kcoverconfig.DefaultAgent(), nil, nil); err == nil {
 		t.Fatal("NewDetector error = nil, want non-nil for nil sink")
-	}
-}
-
-func TestNewDetectorRejectsNilClientForMetaX(t *testing.T) {
-	t.Parallel()
-
-	if _, err := NewDetector("node-a", MetaX, 5, kcoverconfig.MetaX{}, nil, stubSink{}); err == nil {
-		t.Fatal("NewDetector error = nil, want non-nil for nil kubernetes client")
-	}
-}
-
-func TestNewDetectorRejectsUnknownVendor(t *testing.T) {
-	t.Parallel()
-
-	if _, err := NewDetector("node-a", Vendor(99), 5, kcoverconfig.MetaX{}, nil, stubSink{}); err == nil {
-		t.Fatal("NewDetector error = nil, want non-nil for unknown vendor")
 	}
 }
 
 func TestNewDetectorReturnsRunner(t *testing.T) {
 	t.Parallel()
 
-	detector, err := NewDetector("node-a", Nvidia, 5, kcoverconfig.MetaX{}, nil, stubSink{})
+	detector, err := NewDetector("node-a", kcoverconfig.DefaultAgent(), fake.NewSimpleClientset(), stubSink{})
 	if err != nil {
 		t.Fatalf("NewDetector returned error: %v", err)
 	}
 	if detector == nil {
 		t.Fatal("NewDetector result = nil, want non-nil")
 	}
+}
+
+func TestNewDetectorStartsDetector(t *testing.T) {
+	t.Parallel()
+
+	detector, err := NewDetector("node-a", kcoverconfig.DefaultAgent(), fake.NewSimpleClientset(), stubSink{})
+	if err != nil {
+		t.Fatalf("NewDetector returned error: %v", err)
+	}
+
+	if err := detector.Start(context.Background()); err != nil {
+		t.Fatalf("detector.Start() error = %v", err)
+	}
+	detector.Stop()
 }

@@ -12,11 +12,11 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-func TestRecordEventStoresPreflightPayloadInEventAnnotation(t *testing.T) {
+func TestRecordEventDoesNotStorePreflightPayload(t *testing.T) {
 	t.Parallel()
 
 	client := fake.NewSimpleClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}})
-	sink := NewKubeEventSink(client).(*kubeEventSink)
+	sink := NewKubeEventSink(client)
 	payload := `{"workload_size":2,"rank":0,"node_name":"node-a","gpu_check":1,"storage_check":1,"batches":[{"batch_idx":0,"pair":["10.0.0.1","10.0.0.2"],"self_ip":"10.0.0.1","status":"fail"}]}`
 
 	err := sink.RecordEvent(Event{
@@ -27,6 +27,7 @@ func TestRecordEventStoresPreflightPayloadInEventAnnotation(t *testing.T) {
 		Message:      payload,
 		Annotations: map[string]string{
 			constants.PreflightWorkloadAnnotation: "job-a",
+			constants.PreflightReportAnnotation:   "job-a-a1b2c3d4e5",
 		},
 	})
 	if err != nil {
@@ -47,35 +48,29 @@ func TestRecordEventStoresPreflightPayloadInEventAnnotation(t *testing.T) {
 	if stored.Reason != preflightEventReason {
 		t.Fatalf("event reason = %q, want %q", stored.Reason, preflightEventReason)
 	}
-	if stored.Message != "preflight report available for workload(job-a) on node(node-a)" {
-		t.Fatalf("event message = %q, want %q", stored.Message, "preflight report available for workload(job-a) on node(node-a)")
+	if stored.Message != "preflight report(job-a-a1b2c3d4e5) available for workload(job-a) on node(node-a)" {
+		t.Fatalf("event message = %q, want report, workload, and node", stored.Message)
 	}
-	if stored.Annotations[constants.PreflightPayloadAnnotation] != payload {
-		t.Fatalf("event preflight payload annotation = %q, want %q", stored.Annotations[constants.PreflightPayloadAnnotation], payload)
-	}
-	if stored.Annotations[constants.PreflightNamespaceAnnotation] != "default" {
-		t.Fatalf("event preflight namespace annotation = %q, want %q", stored.Annotations[constants.PreflightNamespaceAnnotation], "default")
+	if len(stored.Annotations) != 2 || stored.Annotations[constants.PreflightWorkloadAnnotation] != "job-a" || stored.Annotations[constants.PreflightReportAnnotation] != "job-a-a1b2c3d4e5" {
+		t.Fatalf("event annotations = %v, want workload and report identity", stored.Annotations)
 	}
 	if stored.InvolvedObject.Namespace != stored.Namespace {
 		t.Fatalf("involved object namespace = %q, want %q", stored.InvolvedObject.Namespace, stored.Namespace)
 	}
 }
 
-func TestToInternalEventHydratesPreflightPayloadFromEventAnnotation(t *testing.T) {
+func TestToInternalEventRejectsPreflightObservation(t *testing.T) {
 	t.Parallel()
 
-	payload := `{"workload_size":2,"rank":0,"node_name":"node-a","gpu_check":1,"storage_check":1,"batches":[{"batch_idx":0,"pair":["10.0.0.1","10.0.0.2"],"self_ip":"10.0.0.1","status":"fail"}]}`
 	client := fake.NewSimpleClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}})
-	bridge := NewKubeEventBridge(client).(*kubeEventBridge)
+	transport := NewKubeEventTransport(client)
 
-	event, ok := bridge.toInternalEvent(&corev1.Event{
+	event, ok := transport.toInternalEvent(&corev1.Event{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "preflight-event",
 			Namespace: "default",
 			Annotations: map[string]string{
-				constants.PreflightNamespaceAnnotation: "train-ns",
-				constants.PreflightPayloadAnnotation:   payload,
-				constants.PreflightWorkloadAnnotation:  "job-a",
+				constants.PreflightWorkloadAnnotation: "job-a",
 			},
 		},
 		Message: "preflight report available for workload job-a on node node-a",
@@ -86,17 +81,8 @@ func TestToInternalEventHydratesPreflightPayloadFromEventAnnotation(t *testing.T
 			FieldPath:  "",
 		},
 	})
-	if !ok {
-		t.Fatal("toInternalEvent(...) ok = false, want true")
-	}
-	if event.Namespace != "train-ns" {
-		t.Fatalf("event.Namespace = %q, want %q", event.Namespace, "train-ns")
-	}
-	if event.Message != payload {
-		t.Fatalf("event.Message = %q, want %q", event.Message, payload)
-	}
-	if event.Annotations[constants.PreflightWorkloadAnnotation] != "job-a" {
-		t.Fatalf("job annotation = %q, want %q", event.Annotations[constants.PreflightWorkloadAnnotation], "job-a")
+	if ok {
+		t.Fatalf("toInternalEvent(...) = %+v, true, want preflight Event ignored", event)
 	}
 }
 
@@ -115,12 +101,12 @@ func TestReasonForEventUsesDay2ReasonForNodeEvent(t *testing.T) {
 	}
 }
 
-func TestShouldWatchEventAllowsPreflightNodeEvent(t *testing.T) {
+func TestShouldWatchEventRejectsPreflightObservation(t *testing.T) {
 	t.Parallel()
 
-	bridge := NewKubeEventBridge(fake.NewSimpleClientset()).(*kubeEventBridge)
+	transport := NewKubeEventTransport(fake.NewSimpleClientset())
 
-	if !bridge.shouldWatchEvent(&corev1.Event{
+	if transport.shouldWatchEvent(&corev1.Event{
 		ObjectMeta: metav1.ObjectMeta{
 			CreationTimestamp: metav1.Now(),
 			Annotations: map[string]string{
@@ -129,16 +115,16 @@ func TestShouldWatchEventAllowsPreflightNodeEvent(t *testing.T) {
 		},
 		InvolvedObject: corev1.ObjectReference{APIVersion: "v1", Kind: "Node", Name: "node-a"},
 	}) {
-		t.Fatal("shouldWatchEvent(preflight node event) = false, want true")
+		t.Fatal("shouldWatchEvent(preflight observation) = true, want false")
 	}
 }
 
 func TestShouldWatchEventAllowsDay2NodeEvent(t *testing.T) {
 	t.Parallel()
 
-	bridge := NewKubeEventBridge(fake.NewSimpleClientset()).(*kubeEventBridge)
+	transport := NewKubeEventTransport(fake.NewSimpleClientset())
 
-	if !bridge.shouldWatchEvent(&corev1.Event{
+	if !transport.shouldWatchEvent(&corev1.Event{
 		ObjectMeta: metav1.ObjectMeta{
 			CreationTimestamp: metav1.Now(),
 			Annotations: map[string]string{
@@ -155,9 +141,9 @@ func TestShouldWatchEventAllowsDay2NodeEvent(t *testing.T) {
 func TestToInternalEventPreservesDay2Reason(t *testing.T) {
 	t.Parallel()
 
-	bridge := NewKubeEventBridge(fake.NewSimpleClientset()).(*kubeEventBridge)
+	transport := NewKubeEventTransport(fake.NewSimpleClientset())
 
-	event, ok := bridge.toInternalEvent(&corev1.Event{
+	event, ok := transport.toInternalEvent(&corev1.Event{
 		ObjectMeta: metav1.ObjectMeta{
 			CreationTimestamp: metav1.Now(),
 			Namespace:         "default",
@@ -180,15 +166,15 @@ func TestToInternalEventPreservesDay2Reason(t *testing.T) {
 func TestStartStopClosesEventChannel(t *testing.T) {
 	t.Parallel()
 
-	bridge := NewKubeEventBridge(fake.NewSimpleClientset()).(*kubeEventBridge)
-	if err := bridge.Start(); err != nil {
+	transport := NewKubeEventTransport(fake.NewSimpleClientset())
+	if err := transport.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		bridge.Stop()
+		transport.Stop()
 	}()
 
 	select {
@@ -198,7 +184,7 @@ func TestStartStopClosesEventChannel(t *testing.T) {
 	}
 
 	select {
-	case _, ok := <-bridge.EventChan():
+	case _, ok := <-transport.EventChan():
 		if ok {
 			t.Fatal("event channel still open after Stop()")
 		}
@@ -210,9 +196,9 @@ func TestStartStopClosesEventChannel(t *testing.T) {
 func TestHandleK8sEventUpdateForwardsFoldedDay2Event(t *testing.T) {
 	t.Parallel()
 
-	bridge := NewKubeEventBridge(fake.NewSimpleClientset()).(*kubeEventBridge)
-	startQueueWorkerForTest(t, bridge)
-	defer bridge.Stop()
+	transport := NewKubeEventTransport(fake.NewSimpleClientset())
+	startQueueWorkerForTest(t, transport)
+	defer transport.Stop()
 	now := metav1.NewTime(time.Now())
 	oldEvent := &corev1.Event{
 		ObjectMeta: metav1.ObjectMeta{
@@ -232,10 +218,10 @@ func TestHandleK8sEventUpdateForwardsFoldedDay2Event(t *testing.T) {
 	newEvent.Count = 2
 	newEvent.LastTimestamp = metav1.NewTime(now.Add(time.Minute))
 
-	bridge.handleK8sEventUpdate(context.Background(), oldEvent, newEvent)
+	transport.handleK8sEventUpdate(context.Background(), oldEvent, newEvent)
 
 	select {
-	case event := <-bridge.EventChan():
+	case event := <-transport.EventChan():
 		if event.ResourceType != Node || event.Name != "node-a" || event.Reason != Day2EventReason {
 			t.Fatalf("forwarded event = %+v, want day2 node event", event)
 		}
@@ -247,11 +233,11 @@ func TestHandleK8sEventUpdateForwardsFoldedDay2Event(t *testing.T) {
 func TestHandleK8sEventAddForwardsDay2EventDirectlyWhenEventChannelHasCapacity(t *testing.T) {
 	t.Parallel()
 
-	bridge := NewKubeEventBridge(fake.NewSimpleClientset()).(*kubeEventBridge)
-	startQueueWorkerForTest(t, bridge)
-	defer bridge.Stop()
+	transport := NewKubeEventTransport(fake.NewSimpleClientset())
+	startQueueWorkerForTest(t, transport)
+	defer transport.Stop()
 
-	bridge.handleK8sEventAdd(context.Background(), &corev1.Event{
+	transport.handleK8sEventAdd(context.Background(), &corev1.Event{
 		ObjectMeta: metav1.ObjectMeta{
 			CreationTimestamp: metav1.Now(),
 			Namespace:         "default",
@@ -262,10 +248,10 @@ func TestHandleK8sEventAddForwardsDay2EventDirectlyWhenEventChannelHasCapacity(t
 		Reason:         Day2EventReason,
 		Message:        "insufficient available GPUs: expected 9, found 8",
 		InvolvedObject: corev1.ObjectReference{APIVersion: "v1", Kind: "Node", Name: "node-a"},
-	})
+	}, false)
 
 	select {
-	case event := <-bridge.EventChan():
+	case event := <-transport.EventChan():
 		if event.ResourceType != Node || event.Name != "node-a" || event.Reason != Day2EventReason {
 			t.Fatalf("forwarded event = %+v, want day2 node event", event)
 		}
@@ -274,19 +260,45 @@ func TestHandleK8sEventAddForwardsDay2EventDirectlyWhenEventChannelHasCapacity(t
 	}
 }
 
+func TestHandleK8sEventAddForwardsRecentInitialListEvent(t *testing.T) {
+	t.Parallel()
+
+	transport := NewKubeEventTransport(fake.NewSimpleClientset())
+	transport.handleK8sEventAdd(context.Background(), &corev1.Event{
+		ObjectMeta: metav1.ObjectMeta{
+			CreationTimestamp: metav1.Now(),
+			Namespace:         "default",
+			Annotations: map[string]string{
+				constants.NeedRecoveryAnnotation: constants.True,
+			},
+		},
+		Message:        "old pod failure",
+		InvolvedObject: corev1.ObjectReference{APIVersion: "v1", Kind: "Pod", Namespace: "default", Name: "pod-a"},
+	}, true)
+
+	select {
+	case event := <-transport.EventChan():
+		if event.ResourceType != Pod || event.Namespace != "default" || event.Name != "pod-a" {
+			t.Fatalf("forwarded event = %+v, want initial pod recovery event", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("recent initial List event was not forwarded")
+	}
+}
+
 func TestHandleK8sEventAddQueuesDay2EventWhenEventChannelIsFull(t *testing.T) {
 	t.Parallel()
 
-	bridge := NewKubeEventBridge(fake.NewSimpleClientset()).(*kubeEventBridge)
-	bridge.eventCh = make(chan Event, 1)
-	bridge.eventCh <- Event{ResourceType: Pod, Namespace: "default", Name: "existing", EventType: Error}
-	startQueueWorkerForTest(t, bridge)
-	defer bridge.Stop()
+	transport := NewKubeEventTransport(fake.NewSimpleClientset())
+	transport.eventCh = make(chan Event, 1)
+	transport.eventCh <- Event{ResourceType: Pod, Namespace: "default", Name: "existing", EventType: Error}
+	startQueueWorkerForTest(t, transport)
+	defer transport.Stop()
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		bridge.handleK8sEventAdd(context.Background(), &corev1.Event{
+		transport.handleK8sEventAdd(context.Background(), &corev1.Event{
 			ObjectMeta: metav1.ObjectMeta{
 				CreationTimestamp: metav1.Now(),
 				Namespace:         "default",
@@ -297,7 +309,7 @@ func TestHandleK8sEventAddQueuesDay2EventWhenEventChannelIsFull(t *testing.T) {
 			Reason:         Day2EventReason,
 			Message:        "insufficient available GPUs: expected 9, found 8",
 			InvolvedObject: corev1.ObjectReference{APIVersion: "v1", Kind: "Node", Name: "node-a"},
-		})
+		}, false)
 	}()
 
 	select {
@@ -307,7 +319,7 @@ func TestHandleK8sEventAddQueuesDay2EventWhenEventChannelIsFull(t *testing.T) {
 	}
 
 	select {
-	case event := <-bridge.eventCh:
+	case event := <-transport.eventCh:
 		if event.Name != "existing" {
 			t.Fatalf("first queued event name = %q, want existing", event.Name)
 		}
@@ -316,7 +328,7 @@ func TestHandleK8sEventAddQueuesDay2EventWhenEventChannelIsFull(t *testing.T) {
 	}
 
 	select {
-	case event := <-bridge.eventCh:
+	case event := <-transport.eventCh:
 		if event.ResourceType != Node || event.Name != "node-a" || event.Reason != Day2EventReason {
 			t.Fatalf("forwarded event = %+v, want day2 node event", event)
 		}
@@ -325,65 +337,12 @@ func TestHandleK8sEventAddQueuesDay2EventWhenEventChannelIsFull(t *testing.T) {
 	}
 }
 
-func TestHandleK8sEventAddQueuesPreflightEventWhenEventChannelIsFull(t *testing.T) {
-	t.Parallel()
-
-	payload := `{"workload_size":2,"rank":0,"node_name":"node-a","gpu_check":1,"storage_check":1}`
-	bridge := NewKubeEventBridge(fake.NewSimpleClientset()).(*kubeEventBridge)
-	bridge.eventCh = make(chan Event, 1)
-	bridge.eventCh <- Event{ResourceType: Pod, Namespace: "default", Name: "existing", EventType: Error}
-	startQueueWorkerForTest(t, bridge)
-	defer bridge.Stop()
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		bridge.handleK8sEventAdd(context.Background(), &corev1.Event{
-			ObjectMeta: metav1.ObjectMeta{
-				CreationTimestamp: metav1.Now(),
-				Namespace:         "default",
-				Annotations: map[string]string{
-					constants.PreflightWorkloadAnnotation:  "job-a",
-					constants.PreflightNamespaceAnnotation: "train-ns",
-					constants.PreflightPayloadAnnotation:   payload,
-				},
-			},
-			Message:        "preflight report available",
-			InvolvedObject: corev1.ObjectReference{APIVersion: "v1", Kind: "Node", Name: "node-a"},
-		})
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("handleK8sEventAdd(preflight) did not return after queueing the event")
-	}
-
-	select {
-	case event := <-bridge.eventCh:
-		if event.Name != "existing" {
-			t.Fatalf("first queued event name = %q, want existing", event.Name)
-		}
-	case <-time.After(50 * time.Millisecond):
-		t.Fatal("existing buffered event was not readable")
-	}
-
-	select {
-	case event := <-bridge.eventCh:
-		if event.ResourceType != Node || event.Name != "node-a" || event.Message != payload || !IsPreflightEvent(event.Annotations) {
-			t.Fatalf("forwarded event = %+v, want preflight node event", event)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("handleK8sEventAdd(preflight) forwarded no event, want one")
-	}
-}
-
 func TestShouldWatchEventRejectsNonDay2NodeRecoveryEvent(t *testing.T) {
 	t.Parallel()
 
-	bridge := NewKubeEventBridge(fake.NewSimpleClientset()).(*kubeEventBridge)
+	transport := NewKubeEventTransport(fake.NewSimpleClientset())
 
-	if bridge.shouldWatchEvent(&corev1.Event{
+	if transport.shouldWatchEvent(&corev1.Event{
 		ObjectMeta: metav1.ObjectMeta{
 			CreationTimestamp: metav1.Now(),
 			Annotations: map[string]string{
@@ -399,9 +358,9 @@ func TestShouldWatchEventRejectsNonDay2NodeRecoveryEvent(t *testing.T) {
 func TestShouldWatchEventKeepsPodRecoveryLogic(t *testing.T) {
 	t.Parallel()
 
-	bridge := NewKubeEventBridge(fake.NewSimpleClientset()).(*kubeEventBridge)
+	transport := NewKubeEventTransport(fake.NewSimpleClientset())
 
-	if !bridge.shouldWatchEvent(&corev1.Event{
+	if !transport.shouldWatchEvent(&corev1.Event{
 		ObjectMeta: metav1.ObjectMeta{
 			CreationTimestamp: metav1.Now(),
 			Annotations: map[string]string{
@@ -417,13 +376,13 @@ func TestShouldWatchEventKeepsPodRecoveryLogic(t *testing.T) {
 func TestHandleK8sEventAddQueuesPodEventWhenEventChannelIsFull(t *testing.T) {
 	t.Parallel()
 
-	bridge := NewKubeEventBridge(fake.NewSimpleClientset()).(*kubeEventBridge)
-	bridge.eventCh = make(chan Event, 1)
-	bridge.eventCh <- Event{ResourceType: Pod, Namespace: "default", Name: "existing", EventType: Error}
-	startQueueWorkerForTest(t, bridge)
-	defer bridge.Stop()
+	transport := NewKubeEventTransport(fake.NewSimpleClientset())
+	transport.eventCh = make(chan Event, 1)
+	transport.eventCh <- Event{ResourceType: Pod, Namespace: "default", Name: "existing", EventType: Error}
+	startQueueWorkerForTest(t, transport)
+	defer transport.Stop()
 
-	bridge.handleK8sEventAdd(context.Background(), &corev1.Event{
+	transport.handleK8sEventAdd(context.Background(), &corev1.Event{
 		ObjectMeta: metav1.ObjectMeta{
 			CreationTimestamp: metav1.Now(),
 			Annotations: map[string]string{
@@ -432,10 +391,10 @@ func TestHandleK8sEventAddQueuesPodEventWhenEventChannelIsFull(t *testing.T) {
 		},
 		Message:        "pod failed",
 		InvolvedObject: corev1.ObjectReference{APIVersion: "v1", Kind: "Pod", Namespace: "default", Name: "pod-a"},
-	})
+	}, false)
 
 	select {
-	case event := <-bridge.eventCh:
+	case event := <-transport.eventCh:
 		if event.Name != "existing" {
 			t.Fatalf("first queued event name = %q, want existing", event.Name)
 		}
@@ -444,7 +403,7 @@ func TestHandleK8sEventAddQueuesPodEventWhenEventChannelIsFull(t *testing.T) {
 	}
 
 	select {
-	case event := <-bridge.eventCh:
+	case event := <-transport.eventCh:
 		if event.ResourceType != Pod || event.Name != "pod-a" || event.Message != "pod failed" {
 			t.Fatalf("forwarded event = %+v, want pod recovery event", event)
 		}
@@ -456,16 +415,16 @@ func TestHandleK8sEventAddQueuesPodEventWhenEventChannelIsFull(t *testing.T) {
 func TestStopClosesEventChannelWithQueuedEvents(t *testing.T) {
 	t.Parallel()
 
-	bridge := NewKubeEventBridge(fake.NewSimpleClientset()).(*kubeEventBridge)
-	bridge.eventCh = make(chan Event)
-	startQueueWorkerForTest(t, bridge)
+	transport := NewKubeEventTransport(fake.NewSimpleClientset())
+	transport.eventCh = make(chan Event)
+	startQueueWorkerForTest(t, transport)
 
-	bridge.queue.Add(&Event{ResourceType: Node, Namespace: "default", Name: "node-a", Reason: Day2EventReason, EventType: Error, Message: "boom"})
+	transport.queue.Add(&Event{ResourceType: Node, Namespace: "default", Name: "node-a", Reason: Day2EventReason, EventType: Error, Message: "boom"})
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		bridge.Stop()
+		transport.Stop()
 	}()
 
 	select {
@@ -475,7 +434,7 @@ func TestStopClosesEventChannelWithQueuedEvents(t *testing.T) {
 	}
 
 	select {
-	case _, ok := <-bridge.EventChan():
+	case _, ok := <-transport.EventChan():
 		if ok {
 			t.Fatal("event channel still open after Stop() completed")
 		}
@@ -487,16 +446,16 @@ func TestStopClosesEventChannelWithQueuedEvents(t *testing.T) {
 func TestStopReturnsWhenQueuedForwarderHasNoConsumer(t *testing.T) {
 	t.Parallel()
 
-	bridge := NewKubeEventBridge(fake.NewSimpleClientset()).(*kubeEventBridge)
-	bridge.eventCh = make(chan Event)
-	startQueueWorkerForTest(t, bridge)
+	transport := NewKubeEventTransport(fake.NewSimpleClientset())
+	transport.eventCh = make(chan Event)
+	startQueueWorkerForTest(t, transport)
 
-	bridge.queue.Add(&Event{ResourceType: Node, Namespace: "default", Name: "node-a", Reason: Day2EventReason, EventType: Error, Message: "boom"})
+	transport.queue.Add(&Event{ResourceType: Node, Namespace: "default", Name: "node-a", Reason: Day2EventReason, EventType: Error, Message: "boom"})
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		bridge.Stop()
+		transport.Stop()
 	}()
 
 	select {
@@ -506,11 +465,11 @@ func TestStopReturnsWhenQueuedForwarderHasNoConsumer(t *testing.T) {
 	}
 }
 
-func startQueueWorkerForTest(t *testing.T, bridge *kubeEventBridge) {
+func startQueueWorkerForTest(t *testing.T, transport *KubeEventTransport) {
 	t.Helper()
 
-	bridge.doneCh = make(chan struct{})
+	transport.doneCh = make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
-	bridge.cancel = cancel
-	go bridge.runQueueForwarder(ctx)
+	transport.cancel = cancel
+	go transport.runQueueForwarder(ctx)
 }

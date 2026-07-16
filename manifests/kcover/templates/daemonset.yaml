@@ -22,13 +22,17 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "kcover.serviceAccountName" . }}
+      serviceAccountName: {{ include "kcover.agentServiceAccountName" . }}
       securityContext:
         {{- toYaml .Values.agent.podSecurityContext | nindent 8 }}
       containers:
         - name: agent
           securityContext:
-            {{- toYaml .Values.agent.securityContext | nindent 12 }}
+            {{- $securityContext := deepCopy .Values.agent.securityContext }}
+            {{- if eq (include "kcover.agentFlavor" .) "metax" }}
+            {{- $securityContext = mergeOverwrite $securityContext .Values.agent.flavors.metax.securityContext }}
+            {{- end }}
+            {{- toYaml $securityContext | nindent 12 }}
           image: {{ template "agent.image" . }}
           imagePullPolicy: {{ .Values.agent.image.pullPolicy }}
           args:
@@ -53,10 +57,20 @@ spec:
           {{- with .Values.agent.volumeMounts }}
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- if eq (include "kcover.agentFlavor" .) "metax" }}
+          {{- with .Values.agent.flavors.metax.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- end }}
       volumes:
         - name: agent-config
           configMap:
             name: {{ include "kcover.agentConfigMapName" . }}
         {{- with .Values.agent.volumes }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
+        {{- if eq (include "kcover.agentFlavor" .) "metax" }}
+        {{- with .Values.agent.flavors.metax.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- end }}

@@ -1,10 +1,11 @@
-name: Release
+name: CI and Release
 
 on:
+  pull_request:
   push:
     branches: [ "main" ]
     tags:
-      - '*'
+      - 'v*'
 
 jobs:
   go-unit-test:
@@ -16,12 +17,24 @@ jobs:
       with:
         go-version: '1.26'
     - name: Test
-      run: make test
+      run: make test-all
+
+  helm-test:
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v7
+    - name: Install Helm
+      uses: azure/setup-helm@v5
+    - name: Test Helm chart
+      run: make helm-test
 
   docker-build:
     runs-on: ubuntu-latest
-    needs: [go-unit-test]
+    needs: [go-unit-test, helm-test]
     if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -54,6 +67,15 @@ jobs:
           tags: |
             type=semver,pattern={{raw}}
 
+      - name: Docker meta Agent MetaX
+        id: agent_metax_meta
+        uses: docker/metadata-action@v6
+        with:
+          images: |
+            ghcr.io/baizeai/kcover-agent-metax
+          tags: |
+            type=semver,pattern={{raw}}
+
       - name: Build Image Controller
         uses: docker/build-push-action@v7
         with:
@@ -71,7 +93,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: true
           provenance: false
           tags: ${{ steps.agent_meta.outputs.tags }}
@@ -79,6 +101,19 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           file: docker/agent.Dockerfile
+
+      - name: Build Image Agent MetaX
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ${{ steps.agent_metax_meta.outputs.tags }}
+          labels: ${{ steps.agent_metax_meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          file: docker/agent-metax.Dockerfile
           build-args: |
             MX_SMI_IMAGE=ghcr.io/baizeai/mx-smi:v0.2
 
@@ -104,13 +139,12 @@ jobs:
           VERSION=${GITHUB_REF#refs/tags/}
           echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
 
-      - name: Tag helm chart image
+      - name: Sync Helm chart version
         run: |
           image_tag=${{ steps.get_version.outputs.VERSION }}
-          chart_version=${{ steps.get_version.outputs.VERSION }}
-          sed -i "s/latest/${image_tag}/g" $HELM_CHARTS_DIR/values.yaml
-          chart_smever=${chart_version#"v"}
-          sed -i "s/0.1.0/${chart_smever}/g" $HELM_CHARTS_DIR/Chart.yaml
+          chart_semver=${image_tag#"v"}
+          sed -i -E "s/^version: .*/version: \"${chart_semver}\"/" "$HELM_CHARTS_DIR/Chart.yaml"
+          sed -i -E "s/^appVersion: .*/appVersion: \"${image_tag}\"/" "$HELM_CHARTS_DIR/Chart.yaml"
 
       - uses: getsentry/action-github-app-token@v4.0.0
         id: get_app_token

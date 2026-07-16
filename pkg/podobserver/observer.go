@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/baizeai/kcover/pkg/events"
-	"github.com/baizeai/kcover/pkg/runner"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,7 +20,12 @@ type PodRule interface {
 	OnUpdate(oldPod, newPod *corev1.Pod) []events.Event
 }
 
-type observer struct {
+type initialListPolicy interface {
+	ShouldHandleInitialList() bool
+}
+
+// Observer watches Pods and publishes events produced by its rules.
+type Observer struct {
 	client   kubernetes.Interface
 	sink     events.Sink
 	rules    []PodRule
@@ -31,14 +35,12 @@ type observer struct {
 	nodeName string
 }
 
-var _ runner.Runner = (*observer)(nil)
-
-func New(cli kubernetes.Interface, sink events.Sink, logName string, rules ...PodRule) (runner.Runner, error) {
+func New(cli kubernetes.Interface, sink events.Sink, logName string, rules ...PodRule) (*Observer, error) {
 	if sink == nil {
 		return nil, fmt.Errorf("event sink cannot be nil")
 	}
 
-	return &observer{
+	return &Observer{
 		client:  cli,
 		sink:    sink,
 		rules:   rules,
@@ -46,27 +48,23 @@ func New(cli kubernetes.Interface, sink events.Sink, logName string, rules ...Po
 	}, nil
 }
 
-func NewForNode(cli kubernetes.Interface, sink events.Sink, logName, nodeName string, rules ...PodRule) (runner.Runner, error) {
+func NewForNode(cli kubernetes.Interface, sink events.Sink, logName, nodeName string, rules ...PodRule) (*Observer, error) {
 	if nodeName == "" {
 		return nil, fmt.Errorf("observer node name cannot be empty")
 	}
 
-	runner, err := New(cli, sink, logName, rules...)
+	observer, err := New(cli, sink, logName, rules...)
 	if err != nil {
 		return nil, err
 	}
 
-	obs, ok := runner.(*observer)
-	if !ok {
-		return nil, fmt.Errorf("unexpected observer type %T", runner)
-	}
-	obs.nodeName = nodeName
+	observer.nodeName = nodeName
 
-	return obs, nil
+	return observer, nil
 }
 
-func (o *observer) Start() error {
-	ctx, cancel := context.WithCancel(context.Background())
+func (o *Observer) Start(parent context.Context) error {
+	ctx, cancel := context.WithCancel(parent)
 	o.cancel = cancel
 	o.doneCh = make(chan struct{})
 
@@ -82,14 +80,8 @@ func (o *observer) Start() error {
 	}
 	informer := factory.Core().V1().Pods().Informer()
 
-	_, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj any) {
-			pod, ok := obj.(*corev1.Pod)
-			if !ok {
-				return
-			}
-			o.onAdd(pod)
-		},
+	_, err := informer.AddEventHandler(cache.ResourceEventHandlerDetailedFuncs{
+		AddFunc: o.handleAdd,
 		UpdateFunc: func(oldObj, newObj any) {
 			oldPod, ok := oldObj.(*corev1.Pod)
 			if !ok {
@@ -123,7 +115,25 @@ func (o *observer) Start() error {
 	return nil
 }
 
-func (o *observer) Stop() {
+func (o *Observer) handleAdd(obj any, isInInitialList bool) {
+	pod, ok := obj.(*corev1.Pod)
+	if !ok {
+		return
+	}
+	if !isInInitialList {
+		o.onAdd(pod)
+		return
+	}
+
+	for _, rule := range o.rules {
+		policy, ok := rule.(initialListPolicy)
+		if ok && policy.ShouldHandleInitialList() {
+			o.publish(rule, rule.OnAdd(pod))
+		}
+	}
+}
+
+func (o *Observer) Stop() {
 	if o.cancel != nil {
 		o.cancel()
 	}
@@ -132,20 +142,20 @@ func (o *observer) Stop() {
 	}
 }
 
-func (o *observer) onAdd(pod *corev1.Pod) {
+func (o *Observer) onAdd(pod *corev1.Pod) {
 	for _, rule := range o.rules {
 		o.publish(rule, rule.OnAdd(pod))
 	}
 }
 
-func (o *observer) onUpdate(oldPod, newPod *corev1.Pod) {
+func (o *Observer) onUpdate(oldPod, newPod *corev1.Pod) {
 	for _, rule := range o.rules {
 		events := rule.OnUpdate(oldPod, newPod)
 		o.publish(rule, events)
 	}
 }
 
-func (o *observer) publish(rule PodRule, events []events.Event) {
+func (o *Observer) publish(rule PodRule, events []events.Event) {
 	ruleName := fmt.Sprintf("%T", rule)
 	if len(events) == 0 {
 		return

@@ -1,6 +1,8 @@
 package runner
 
+import "context"
+
 type Runner interface {
-	Start() error
+	Start(context.Context) error
 	Stop()
 }

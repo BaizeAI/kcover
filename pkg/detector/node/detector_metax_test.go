@@ -1,4 +1,6 @@
-package metax
+//go:build metax
+
+package node
 
 import (
 	"context"
@@ -8,16 +10,51 @@ import (
 	"testing"
 	"time"
 
-	kcoverconfig "github.com/baizeai/kcover/cmd/agent/config"
+	kcoverconfig "github.com/baizeai/kcover/pkg/agentconfig"
 	"github.com/baizeai/kcover/pkg/events"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
 const defaultCheckTime = "10:15"
+
+func newMetaXDetector(cfg kcoverconfig.MetaX, client kubernetes.Interface) *metaXDetector {
+	d := &metaXDetector{
+		eventCh: make(chan events.Event, bufferSize),
+		config:  cfg,
+		client:  client,
+	}
+	d.capabilityCheck = d.hasMetaXGPUCapacity
+	d.checkFn = d.check
+
+	return d
+}
+
+func TestNewDetectorRejectsNilClientForMetaxBuild(t *testing.T) {
+	t.Parallel()
+
+	if _, err := NewDetector("node-a", kcoverconfig.DefaultAgent(), nil, stubSink{}); err == nil {
+		t.Fatal("NewDetector error = nil, want non-nil for nil kubernetes client")
+	}
+}
+
+func TestNewDetectorUsesMetaxDetector(t *testing.T) {
+	t.Parallel()
+
+	instance, err := NewDetector("node-a", kcoverconfig.DefaultAgent(), fake.NewSimpleClientset(), stubSink{})
+	if err != nil {
+		t.Fatalf("NewDetector returned error: %v", err)
+	}
+
+	impl := instance.(*detector)
+	if got := fmt.Sprint(impl.detector); got != "MetaX" {
+		t.Fatalf("detector = %q, want MetaX", got)
+	}
+}
 
 func TestNextCheckTimeSameDay(t *testing.T) {
 	t.Parallel()
@@ -74,10 +111,10 @@ func TestNextCheckTimeRejectsInvalidSchedule(t *testing.T) {
 	}
 }
 
-func TestNewDetectorKeepsIntervalAndHour(t *testing.T) {
+func TestNewDetectorKeepsConfig(t *testing.T) {
 	t.Parallel()
 
-	instance := NewDetector(kcoverconfig.MetaX{
+	instance := newMetaXDetector(kcoverconfig.MetaX{
 		NodeName:           "node-a",
 		HCAIDs:             []string{"mlx5_0", "mlx5_1"},
 		GPUNum:             8,
@@ -85,15 +122,12 @@ func TestNewDetectorKeepsIntervalAndHour(t *testing.T) {
 		ECCMaxCount:        64,
 		NTPMaxOffsetMillis: 10,
 		Day2CheckTime:      defaultCheckTime,
-	}, 5, fake.NewSimpleClientset())
+	}, fake.NewSimpleClientset())
 	if instance.config.NodeName != "node-a" {
 		t.Fatalf("instance.config.NodeName = %q, want %q", instance.config.NodeName, "node-a")
 	}
 	if !reflect.DeepEqual(instance.config.HCAIDs, []string{"mlx5_0", "mlx5_1"}) {
 		t.Fatalf("instance.config.HCAIDs = %v, want %v", instance.config.HCAIDs, []string{"mlx5_0", "mlx5_1"})
-	}
-	if instance.interval != 5 {
-		t.Fatalf("instance.interval = %d, want 5", instance.interval)
 	}
 	if instance.config.GPUNum != 8 {
 		t.Fatalf("instance.config.GPUNum = %d, want 8", instance.config.GPUNum)
@@ -115,7 +149,7 @@ func TestNewDetectorKeepsIntervalAndHour(t *testing.T) {
 func TestNodeHasPositiveMetaXGPUCapacity(t *testing.T) {
 	t.Parallel()
 
-	instance := NewDetector(kcoverconfig.MetaX{NodeName: "node-a"}, 5, fake.NewSimpleClientset(&corev1.Node{
+	instance := newMetaXDetector(kcoverconfig.MetaX{NodeName: "node-a"}, fake.NewSimpleClientset(&corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
 		Status: corev1.NodeStatus{Capacity: corev1.ResourceList{
 			metaXGPUResourceName: resource.MustParse("8"),
@@ -134,7 +168,7 @@ func TestNodeHasPositiveMetaXGPUCapacity(t *testing.T) {
 func TestNodeHasPositiveMetaXGPUCapacityReturnsFalseWhenMissing(t *testing.T) {
 	t.Parallel()
 
-	instance := NewDetector(kcoverconfig.MetaX{NodeName: "node-a"}, 5, fake.NewSimpleClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}}))
+	instance := newMetaXDetector(kcoverconfig.MetaX{NodeName: "node-a"}, fake.NewSimpleClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}}))
 
 	enabled, err := instance.hasMetaXGPUCapacity(context.Background())
 	if err != nil {
@@ -148,7 +182,7 @@ func TestNodeHasPositiveMetaXGPUCapacityReturnsFalseWhenMissing(t *testing.T) {
 func TestNodeHasPositiveMetaXGPUCapacityReturnsFalseWhenZero(t *testing.T) {
 	t.Parallel()
 
-	instance := NewDetector(kcoverconfig.MetaX{NodeName: "node-a"}, 5, fake.NewSimpleClientset(&corev1.Node{
+	instance := newMetaXDetector(kcoverconfig.MetaX{NodeName: "node-a"}, fake.NewSimpleClientset(&corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
 		Status: corev1.NodeStatus{Capacity: corev1.ResourceList{
 			metaXGPUResourceName: resource.MustParse("0"),
@@ -167,7 +201,7 @@ func TestNodeHasPositiveMetaXGPUCapacityReturnsFalseWhenZero(t *testing.T) {
 func TestDay2CheckSkipsNodeWithoutMetaXGPUCapacity(t *testing.T) {
 	t.Parallel()
 
-	instance := NewDetector(kcoverconfig.MetaX{NodeName: "node-a"}, 5, fake.NewSimpleClientset())
+	instance := newMetaXDetector(kcoverconfig.MetaX{NodeName: "node-a"}, fake.NewSimpleClientset())
 	checkCalled := false
 	instance.capabilityCheck = func(context.Context) (bool, error) { return false, nil }
 	instance.checkFn = func() error {
@@ -191,7 +225,7 @@ func TestDay2CheckSkipsNodeWithoutMetaXGPUCapacity(t *testing.T) {
 func TestDay2CheckEmitsEventWhenCapabilityEnabledAndCheckFails(t *testing.T) {
 	t.Parallel()
 
-	instance := NewDetector(kcoverconfig.MetaX{NodeName: "node-a"}, 5, fake.NewSimpleClientset())
+	instance := newMetaXDetector(kcoverconfig.MetaX{NodeName: "node-a"}, fake.NewSimpleClientset())
 	instance.capabilityCheck = func(context.Context) (bool, error) { return true, nil }
 	instance.checkFn = func() error { return fmt.Errorf("boom") }
 
@@ -212,7 +246,7 @@ func TestDay2CheckEmitsEventWhenCapabilityEnabledAndCheckFails(t *testing.T) {
 
 	select {
 	case <-done:
-	default:
+	case <-time.After(time.Second):
 		t.Fatal("day2Check() did not return after emitting event")
 	}
 	instance.Stop()
@@ -221,7 +255,7 @@ func TestDay2CheckEmitsEventWhenCapabilityEnabledAndCheckFails(t *testing.T) {
 func TestDay2CheckReturnsWhenContextCanceledBeforeSendingEvent(t *testing.T) {
 	t.Parallel()
 
-	instance := NewDetector(kcoverconfig.MetaX{NodeName: "node-a"}, 5, fake.NewSimpleClientset())
+	instance := newMetaXDetector(kcoverconfig.MetaX{NodeName: "node-a"}, fake.NewSimpleClientset())
 	instance.capabilityCheck = func(context.Context) (bool, error) { return true, nil }
 	instance.checkFn = func() error { return fmt.Errorf("boom") }
 	ctx, cancel := context.WithCancel(context.Background())
@@ -243,8 +277,8 @@ func TestDay2CheckReturnsWhenContextCanceledBeforeSendingEvent(t *testing.T) {
 func TestStopClosesEventChannelAfterStartGoroutineExits(t *testing.T) {
 	t.Parallel()
 
-	instance := NewDetector(kcoverconfig.MetaX{NodeName: "node-a", Day2CheckTime: defaultCheckTime}, 5, fake.NewSimpleClientset())
-	if err := instance.Start(); err != nil {
+	instance := newMetaXDetector(kcoverconfig.MetaX{NodeName: "node-a", Day2CheckTime: defaultCheckTime}, fake.NewSimpleClientset())
+	if err := instance.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 
@@ -273,8 +307,8 @@ func TestStopClosesEventChannelAfterStartGoroutineExits(t *testing.T) {
 func TestStartReturnsErrorForInvalidDay2Schedule(t *testing.T) {
 	t.Parallel()
 
-	instance := NewDetector(kcoverconfig.MetaX{NodeName: "node-a", Day2CheckTime: "invalid"}, 5, fake.NewSimpleClientset())
-	if err := instance.Start(); err == nil {
+	instance := newMetaXDetector(kcoverconfig.MetaX{NodeName: "node-a", Day2CheckTime: "invalid"}, fake.NewSimpleClientset())
+	if err := instance.Start(context.Background()); err == nil {
 		t.Fatal("Start() error = nil, want error for invalid day2 schedule")
 	}
 }

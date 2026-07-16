@@ -5,21 +5,20 @@
 fullnameOverride: ""
 nameOverride: ""
 
-serviceAccount:
-  # Specifies whether a service account should be created
-  create: true
-  # Automatically mount a ServiceAccount's API credentials?
-  automount: true
-  # Annotations to add to the service account
-  annotations: {}
-  # The name of the service account to use.
-  # If not set and create is true, a name is generated using the fullname template
-  name: ""
-
 global:
   imageRegistry: ghcr.io
 
 agent:
+  serviceAccount:
+    # The name of the agent ServiceAccount. A name is generated when empty.
+    name: ""
+    annotations: {}
+
+  # Agent deployment flavor. Supported values: base, metax.
+  # base uses the generic multi-arch agent image; metax uses the MetaX-specific agent image
+  # and enables MetaX-only host mounts.
+  flavor: base
+
   # Additional CLI args for kcover-agent process (for example: ["-v=2"]).
   # --config is always injected by the chart and does not need to be repeated here.
   # Default to info-only logs; set -v=2/-v=4 for debug details.
@@ -29,19 +28,12 @@ agent:
   config:
     existingConfigMap: "" # 留空时自动创建；设置后直接挂载用户自定义 ConfigMap
     path: /etc/kcover-agent/config.yaml
-    data:
-      vendor: 1 # 默认 Nvidia；MetaX 为 2
-      interval: 5 # 以秒为单位的诊断间隔
-      metaX:
-        hcaIDs: [] # 需要使用ibv_devinfo检查,状态为 PORT_ACTIVE 的 HCA ID 列表，例如 ["mlx5_0", "mlx5_1"]
-        day2CheckTime: "10:00" # 每天检查时间，24小时制 HH:MM，默认为 10:00
-        gpuNum: 8 # 最少可用 GPU 数量阈值
-        temperature: 85 # hotspot 温度上限，单位摄氏度，默认 85 度
-        eccMaxCount: 64 # 每张卡允许的 Double Bit ECC 最大值
+    data: {}
 
   image:
     registry: ''
-    repository: baizeai/kcover-agent
+    # Leave empty to select the default repository from agent.flavor.
+    repository: ''
     pullPolicy: IfNotPresent
     # Overrides the image tag whose default is the chart appVersion.
     tag: ""
@@ -53,7 +45,7 @@ agent:
   podSecurityContext: {}
     # fsGroup: 2000
   securityContext:
-    privileged: true
+    privileged: false
     # capabilities:
     #   drop:
     #   - ALL
@@ -80,43 +72,65 @@ agent:
     targetCPUUtilizationPercentage: 80
     # targetMemoryUtilizationPercentage: 80
 
-  # Additional volumes on the output Deployment definition.
+  # Additional volumes on the output agent DaemonSet definition.
   volumes:
-    - name: infiniband
-      hostPath:
-        path: /dev/infiniband
-        type: DirectoryOrCreate
     - name: preflight-report
       hostPath:
         path: /var/lib/kcover/preflight
         type: DirectoryOrCreate
-    - name: host-localtime
-      hostPath:
-        path: /etc/localtime
-        type: File
   # - name: foo
   #   secret:
   #     secretName: mysecret
   #     optional: false
 
-  # Additional volumeMounts on the output Deployment definition.
+  # Additional volumeMounts on the output agent DaemonSet definition.
   volumeMounts:
-    - name: infiniband
-      mountPath: /dev/infiniband
     - name: preflight-report
       mountPath: /var/lib/kcover/preflight
-    - name: host-localtime
-      mountPath: /etc/localtime
-      readOnly: true
   # - name: foo
   #   mountPath: "/etc/foo"
   #   readOnly: true
+
+  flavors:
+    metax:
+      # Automatically merged into agent.config.data when agent.flavor=metax.
+      config:
+        metaX:
+          hcaIDs: [] # 需要使用 ibv_devinfo 检查, 状态为 PORT_ACTIVE 的 HCA ID 列表，例如 ["mlx5_0", "mlx5_1"]
+          day2CheckTime: "10:00" # 每天检查时间，24 小时制 HH:MM
+          gpuNum: 8 # 最少可用 GPU 数量阈值
+          temperature: 85 # hotspot 温度上限，单位摄氏度
+          eccMaxCount: 64 # 每张卡允许的 Double Bit ECC 最大值
+      # The MetaX checks require privileged access to host devices.
+      securityContext:
+        privileged: true
+      # Additional host resources used only by the MetaX image.
+      volumes:
+        - name: infiniband
+          hostPath:
+            path: /dev/infiniband
+            type: DirectoryOrCreate
+        - name: host-localtime
+          hostPath:
+            path: /etc/localtime
+            type: File
+      volumeMounts:
+        - name: infiniband
+          mountPath: /dev/infiniband
+        - name: host-localtime
+          mountPath: /etc/localtime
+          readOnly: true
 
   nodeSelector: {}
   tolerations: []
   affinity: {}
 
 controller:
+  serviceAccount:
+    # The name of the controller ServiceAccount. A name is generated when empty.
+    name: ""
+    annotations: {}
+
   leaderElection:
     # Whether the controller should acquire and renew the Lease lock.
     # Default is true and should be kept for HA or multi-replica deployments.

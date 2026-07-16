@@ -290,9 +290,9 @@ func TestIntersectFailedNodeIPsReturnsSharedNodeAcrossAllFailedBatches(t *testin
 	t.Parallel()
 
 	failedByBatch := map[batchIndex]nodeIPSet{
-		batchIndex(0): nodeIPSet{nodeIP("node-c"): {}, nodeIP("node-d"): {}},
-		batchIndex(1): nodeIPSet{nodeIP("node-a"): {}, nodeIP("node-c"): {}},
-		batchIndex(2): nodeIPSet{nodeIP("node-b"): {}, nodeIP("node-c"): {}},
+		batchIndex(0): {nodeIP("node-c"): {}, nodeIP("node-d"): {}},
+		batchIndex(1): {nodeIP("node-a"): {}, nodeIP("node-c"): {}},
+		batchIndex(2): {nodeIP("node-b"): {}, nodeIP("node-c"): {}},
 	}
 
 	actual := intersectFailedNodeIPs(failedByBatch, nil)
@@ -314,9 +314,9 @@ func TestIntersectFailedNodeIPsResolvesNodeNames(t *testing.T) {
 	t.Parallel()
 
 	failedByBatch := map[batchIndex]nodeIPSet{
-		batchIndex(0): nodeIPSet{nodeIP("10.0.0.1"): {}, nodeIP("10.0.0.2"): {}},
-		batchIndex(1): nodeIPSet{nodeIP("10.0.0.1"): {}, nodeIP("10.0.0.3"): {}},
-		batchIndex(2): nodeIPSet{nodeIP("10.0.0.1"): {}, nodeIP("10.0.0.4"): {}},
+		batchIndex(0): {nodeIP("10.0.0.1"): {}, nodeIP("10.0.0.2"): {}},
+		batchIndex(1): {nodeIP("10.0.0.1"): {}, nodeIP("10.0.0.3"): {}},
+		batchIndex(2): {nodeIP("10.0.0.1"): {}, nodeIP("10.0.0.4"): {}},
 	}
 	nodeIPToName := map[nodeIP]nodeName{
 		nodeIP("10.0.0.1"): nodeName("node-a"),
@@ -630,6 +630,15 @@ func TestExtractNodeReportRejectsOddWorkloadSize(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "odd workload sizes are not supported") {
 			t.Fatalf("extractNodeReport(...) error = %v, want odd node count error", err)
 		}
+	}
+}
+
+func TestExtractNodeReportRejectsOversizedWorkload(t *testing.T) {
+	t.Parallel()
+
+	report := fmt.Sprintf(`{"workload_size":%d,"rank":0,"node_name":"node-a"}`, maxWorkloadSize+2)
+	if _, _, _, err := extractNodeReport(report); err == nil {
+		t.Fatal("extractNodeReport() error = nil, want oversized workload rejected")
 	}
 }
 
@@ -1092,8 +1101,31 @@ func TestSlowNodeAggregatorAddReportIgnoresOtherStaleWorkloads(t *testing.T) {
 	if len(aggregator.workloads) != 1 {
 		t.Fatalf("len(aggregator.workloads) after expiry = %d, want 1", len(aggregator.workloads))
 	}
-	if _, ok := aggregator.workloads[workloadKey{namespace: "default", workloadName: "job-b"}]; !ok {
+	if _, ok := aggregator.workloads[workloadKey{namespace: "default", workloadUID: "job-b", workloadName: "job-b"}]; !ok {
 		t.Fatal("job-b workload missing after ExpireTimedOutWorkloads()")
+	}
+}
+
+func TestSlowNodeAggregatorDoesNotCombineReportsOutsideObservationWindow(t *testing.T) {
+	t.Parallel()
+
+	aggregator := NewSlowNodeAggregator(10 * time.Second)
+	firstObservedAt := time.Unix(100, 0)
+	first := `{"version":1,"workload":"job-a","workload_size":2,"rank":0,"node_name":"node-a","node_ip":"10.0.0.1","gpu_check":1,"storage_check":1,"batches":[{"batch_idx":0,"pair":["10.0.0.1","10.0.0.2"],"self_ip":"10.0.0.1","status":"fail"}]}`
+	second := `{"version":1,"workload":"job-a","workload_size":2,"rank":1,"node_name":"node-b","node_ip":"10.0.0.2","gpu_check":1,"storage_check":1,"batches":[{"batch_idx":0,"pair":["10.0.0.1","10.0.0.2"],"self_ip":"10.0.0.2","status":"fail"}]}`
+
+	ready, _, err := aggregator.AddReportForWorkload("default", "job-uid", "job-a", first, firstObservedAt)
+	if err != nil || ready {
+		t.Fatalf("first AddReportForWorkload() = %v, %v, want false, nil", ready, err)
+	}
+	ready, _, err = aggregator.AddReportForWorkload("default", "job-uid", "job-a", second, firstObservedAt.Add(11*time.Second))
+	if ready || !errors.Is(err, ErrWorkloadReportTimeout) {
+		t.Fatalf("late AddReportForWorkload() = %v, %v, want false, timeout", ready, err)
+	}
+
+	ready, _, err = aggregator.AddReportForWorkload("default", "job-uid", "job-a", first, firstObservedAt.Add(12*time.Second))
+	if err != nil || !ready {
+		t.Fatalf("replacement-window AddReportForWorkload() = %v, %v, want true, nil", ready, err)
 	}
 }
 

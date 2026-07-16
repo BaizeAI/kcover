@@ -8,5 +8,10 @@ metadata:
     {{- include "kcover.labels" . | nindent 4 }}
 data:
   {{ base .Values.agent.config.path }}: |
-{{ toYaml .Values.agent.config.data | indent 4 }}
+    {{- $config := dict }}
+    {{- if eq (include "kcover.agentFlavor" .) "metax" }}
+    {{- $config = deepCopy .Values.agent.flavors.metax.config }}
+    {{- end }}
+    {{- $config = mergeOverwrite $config (deepCopy .Values.agent.config.data) }}
+{{ toYaml $config | indent 4 }}
 {{- end }}

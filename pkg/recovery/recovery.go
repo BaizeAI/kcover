@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"time"
 
+	kcoverv1alpha1 "github.com/baizeai/kcover/pkg/apis/kcover/v1alpha1"
 	"github.com/baizeai/kcover/pkg/constants"
 	"github.com/baizeai/kcover/pkg/events"
 	"github.com/baizeai/kcover/pkg/kube"
 	"github.com/baizeai/kcover/pkg/preflight"
 
-	"github.com/jellydator/ttlcache/v3"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -21,31 +21,32 @@ import (
 type RecoveryController struct {
 	client                 kubernetes.Interface
 	eventStream            events.Stream
-	eventSink              events.Sink
+	reportCh               <-chan *kcoverv1alpha1.PreflightReport
 	cancel                 context.CancelFunc
 	doneCh                 chan struct{}
 	preflight              *preflightTracker
 	preflightSweepInterval time.Duration
 	restartDuration        time.Duration
-	restarts               *ttlcache.Cache[string, time.Time]
+	jobRestartLedger       *jobRestartLedger
 }
 
 const DefaultPreflightSweepInterval = time.Minute
 
-func NewController(cli kubernetes.Interface, stream events.Stream, preflightReportCollectionTimeout, preflightSweepInterval time.Duration) *RecoveryController {
+func NewController(cli kubernetes.Interface, stream events.Stream, reportCh <-chan *kcoverv1alpha1.PreflightReport, preflightReportCollectionTimeout, preflightSweepInterval time.Duration) *RecoveryController {
 	if preflightSweepInterval <= 0 {
 		preflightSweepInterval = DefaultPreflightSweepInterval
 	}
 
-	return &RecoveryController{
+	controller := &RecoveryController{
 		client:                 cli,
 		eventStream:            stream,
-		eventSink:              events.NewKubeEventSink(cli),
+		reportCh:               reportCh,
 		preflight:              newPreflightTracker(preflightReportCollectionTimeout),
 		preflightSweepInterval: preflightSweepInterval,
 		restartDuration:        time.Second * 30,
-		restarts:               ttlcache.New[string, time.Time](),
+		jobRestartLedger:       newJobRestartLedger(cli, kube.CurrentNamespace()),
 	}
+	return controller
 }
 
 func (r *RecoveryController) handlePreflightTimeout(timeoutErr preflight.WorkloadTimeoutError) {
@@ -88,7 +89,12 @@ func (r *RecoveryController) onPodError(ctx context.Context, namespace, name str
 		klog.V(2).InfoS("skip recovery for pod", "namespace", namespace, "pod", name, "reason", "restartPolicy is Never")
 		return
 	}
-	if !r.allowJobRestart(namespace, jobLabel) {
+	restartAllowed, err := r.allowJobRestart(ctx, namespace, jobLabel)
+	if err != nil {
+		klog.ErrorS(err, "failed to determine whether job restart is allowed", "namespace", namespace, "job", jobLabel)
+		return
+	}
+	if !restartAllowed {
 		return
 	}
 
@@ -109,22 +115,16 @@ func (r *RecoveryController) isRecoveryEnabledForPod(ctx context.Context, pod *c
 	return labels[constants.EnabledRecoveryLabel] == constants.True, nil
 }
 
-func (r *RecoveryController) allowJobRestart(namespace, jobLabel string) bool {
-	key := fmt.Sprintf("%s/%s", namespace, jobLabel)
-	restartedAt := r.restarts.Get(key)
-	if restartedAt != nil {
-		klog.V(2).InfoS("skip restart for job", "namespace", namespace, "job", jobLabel, "lastRestartedAt", restartedAt.Value(), "retryWindow", r.restartDuration)
-		return false
+func (r *RecoveryController) allowJobRestart(ctx context.Context, namespace, jobLabel string) (bool, error) {
+	restartAllowed, lastRestartAt, err := r.jobRestartLedger.allowRestart(ctx, namespace, jobLabel, r.restartDuration)
+	if err != nil {
+		return false, err
+	}
+	if !restartAllowed {
+		klog.V(2).InfoS("skip restart for job", "namespace", namespace, "job", jobLabel, "lastRestartAt", lastRestartAt, "retryWindow", r.restartDuration)
 	}
 
-	now := time.Now()
-	r.restarts.Set(key, now, r.restartDuration) // only restart once within restartDuration
-	go func() {
-		<-time.After(r.restartDuration - time.Second)
-		r.restarts.Delete(key)
-	}()
-
-	return true
+	return restartAllowed, nil
 }
 
 func (r *RecoveryController) restartJob(ctx context.Context, namespace, name string) {
@@ -224,44 +224,38 @@ func (r *RecoveryController) listJobsOnNode(ctx context.Context, nodeName string
 	return items, nil
 }
 
-func (r *RecoveryController) onPreflightReport(ctx context.Context, namespace string, e events.Event) {
-	klog.V(2).InfoS("handle preflight report", "namespace", namespace, "node", e.Name, "annotations", e.Annotations, "messageBytes", len(e.Message))
+func (r *RecoveryController) onPreflightReport(ctx context.Context, report *kcoverv1alpha1.PreflightReport) {
+	klog.V(2).InfoS("handle PreflightReport", "namespace", report.Namespace, "name", report.Name, "node", report.Spec.NodeName, "workload", report.Spec.WorkloadName, "reportBytes", len(report.Spec.Report))
 
-	result, err := r.preflight.handleReport(e)
+	result, err := r.preflight.handleReport(report)
 	if err != nil {
 		var timeoutErr preflight.WorkloadTimeoutError
 		if errors.As(err, &timeoutErr) {
 			r.handlePreflightTimeout(timeoutErr)
 			return
 		}
-		klog.ErrorS(err, "failed to aggregate preflight report", "namespace", namespace, "node", e.Name)
+		klog.ErrorS(err, "failed to aggregate PreflightReport", "namespace", report.Namespace, "name", report.Name, "node", report.Spec.NodeName)
 		return
 	}
 
 	if result.skipped && result.workloadName == "" {
-		klog.V(2).InfoS("skip preflight report event", "namespace", namespace, "node", e.Name, "reason", "collector unavailable or workload annotation missing")
-		return
-	}
-
-	if result.duplicate {
-		klog.V(2).InfoS("skip duplicate preflight report", "namespace", namespace, "node", e.Name, "workload", result.workloadName)
+		klog.V(2).InfoS("skip PreflightReport", "namespace", report.Namespace, "name", report.Name, "node", report.Spec.NodeName, "reason", "collector unavailable or workload name missing")
 		return
 	}
 
 	if result.waiting {
-		klog.V(2).InfoS("buffer preflight report", "namespace", namespace, "workload", result.workloadName, "state", "waiting")
+		klog.V(2).InfoS("buffer PreflightReport", "namespace", report.Namespace, "workload", result.workloadName, "state", "waiting")
 		return
 	}
-
 	if len(result.slowNodes) == 0 {
-		klog.InfoS("preflight report finished without slow nodes", "namespace", namespace, "workload", result.workloadName)
+		klog.InfoS("preflight report finished without slow nodes", "namespace", report.Namespace, "workload", result.workloadName)
 		return
 	}
 
-	klog.InfoS("preflight report finished with slow nodes", "namespace", namespace, "workload", result.workloadName, "slowNodes", result.slowNodes)
+	klog.InfoS("preflight report finished with slow nodes", "namespace", report.Namespace, "workload", result.workloadName, "slowNodes", result.slowNodes)
 
 	for _, node := range result.slowNodes {
-		klog.V(2).InfoS("preflight marked slow node", "node", node, "namespace", namespace, "workload", result.workloadName)
+		klog.V(2).InfoS("preflight marked slow node", "node", node, "namespace", report.Namespace, "workload", result.workloadName)
 		r.ensureNodeUnschedulable(ctx, node)
 	}
 }
@@ -281,11 +275,6 @@ func (r *RecoveryController) onEvent(ctx context.Context, e events.Event) {
 			r.onPodError(ctx, e.Namespace, e.Name)
 		}
 	case events.Node:
-		if events.IsPreflightEvent(e.Annotations) {
-			klog.V(2).InfoS("dispatch preflight event", "namespace", e.Namespace, "node", e.Name)
-			r.onPreflightReport(ctx, e.Namespace, e)
-			return
-		}
 		klog.V(2).InfoS("dispatch node event", "node", e.Name)
 		r.onNodeError(ctx, e)
 	default:
@@ -293,11 +282,11 @@ func (r *RecoveryController) onEvent(ctx context.Context, e events.Event) {
 	}
 }
 
-func (r *RecoveryController) Start() error {
+func (r *RecoveryController) Start(parent context.Context) error {
 	if r.eventStream == nil {
 		return fmt.Errorf("event stream cannot be nil")
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parent)
 	r.cancel = cancel
 	r.doneCh = make(chan struct{})
 
@@ -306,6 +295,7 @@ func (r *RecoveryController) Start() error {
 		ticker := time.NewTicker(r.preflightSweepInterval)
 		defer ticker.Stop()
 		eventCh := r.eventStream.EventChan()
+		reportCh := r.reportCh
 		for {
 			select {
 			case <-ctx.Done():
@@ -320,6 +310,13 @@ func (r *RecoveryController) Start() error {
 					return
 				}
 				r.onEvent(ctx, e)
+
+			case report, ok := <-reportCh:
+				if !ok {
+					reportCh = nil
+					continue
+				}
+				r.onPreflightReport(ctx, report)
 			}
 		}
 

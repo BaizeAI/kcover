@@ -6,5 +6,5 @@ import (
 
 const (
 	DefaultBusBWThresholdGBPS      = 0.0
-	DefaultReportCollectionTimeout = 30 * time.Minute
+	DefaultReportCollectionTimeout = 10 * time.Minute
 )

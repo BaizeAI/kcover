@@ -1,7 +1,10 @@
 # builder
-FROM --platform=$BUILDPLATFORM m.daocloud.io/docker.io/golang:1.26.5 AS builder
+ARG GO_BUILDER_IMAGE=m.daocloud.io/docker.io/library/golang:1.25.5-alpine
+FROM --platform=$BUILDPLATFORM ${GO_BUILDER_IMAGE} AS builder
 
 WORKDIR /app
+
+ENV GOTOOLCHAIN=auto
 
 COPY go.mod /app/go.mod
 COPY go.sum /app/go.sum
@@ -19,7 +22,7 @@ ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -ldflags "-s -w" -o kcover-controller ./cmd/kcover
 
 # runner
-FROM m.daocloud.io/docker.io/ubuntu:22.04
+FROM m.daocloud.io/docker.io/ubuntu:24.04
 
 WORKDIR /app
 

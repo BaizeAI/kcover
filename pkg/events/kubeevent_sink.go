@@ -18,7 +18,8 @@ import (
 	"k8s.io/klog/v2"
 )
 
-type kubeEventSink struct {
+// KubeEventSink records internal recovery events as Kubernetes Events.
+type KubeEventSink struct {
 	client   kubernetes.Interface
 	recorder record.EventRecorder
 }
@@ -29,8 +30,8 @@ const (
 	Day2EventReason      = "Day2CheckFailed"
 )
 
-func NewKubeEventSink(cli kubernetes.Interface) Sink {
-	return &kubeEventSink{
+func NewKubeEventSink(cli kubernetes.Interface) *KubeEventSink {
+	return &KubeEventSink{
 		client:   cli,
 		recorder: newEventRecorder(cli),
 	}
@@ -45,7 +46,7 @@ func newEventRecorder(cli kubernetes.Interface) record.EventRecorder {
 	return eb.NewRecorder(runtime.NewScheme(), corev1.EventSource{Component: "kcover"})
 }
 
-func (sink *kubeEventSink) recordToPod(e Event) error {
+func (sink *KubeEventSink) recordToPod(e Event) error {
 	ctx, cancel := kube.WithRequestTimeout(context.Background())
 	defer cancel()
 
@@ -57,7 +58,7 @@ func (sink *kubeEventSink) recordToPod(e Event) error {
 	return sink.recordEvent(pod, e)
 }
 
-func (sink *kubeEventSink) recordToNode(e Event) error {
+func (sink *KubeEventSink) recordToNode(e Event) error {
 	ctx, cancel := kube.WithRequestTimeout(context.Background())
 	defer cancel()
 
@@ -69,7 +70,7 @@ func (sink *kubeEventSink) recordToNode(e Event) error {
 	return sink.recordEvent(node, e)
 }
 
-func (sink *kubeEventSink) recordEvent(obj runtime.Object, event Event) error {
+func (sink *KubeEventSink) recordEvent(obj runtime.Object, event Event) error {
 	ref, err := reference.GetReference(scheme.Scheme, obj)
 	if err != nil {
 		return err
@@ -93,13 +94,13 @@ func ensureEventNamespace(ref *corev1.ObjectReference, event Event) {
 	ref.Namespace = kube.CurrentNamespace()
 }
 
-func (sink *kubeEventSink) recordStdEvent(ref *corev1.ObjectReference, event Event) error {
+func (sink *KubeEventSink) recordStdEvent(ref *corev1.ObjectReference, event Event) error {
 	sink.recorder.AnnotatedEventf(ref, annotationsForEvent(event), corev1.EventTypeWarning, reasonForEvent(event), "%s", event.Message)
 	klog.V(3).InfoS("record standard event", "kind", ref.Kind, "namespace", ref.Namespace, "name", ref.Name, "eventType", event.EventType)
 	return nil
 }
 
-func (sink *kubeEventSink) recordPreflightEvent(ref *corev1.ObjectReference, event Event) error {
+func (sink *KubeEventSink) recordPreflightEvent(ref *corev1.ObjectReference, event Event) error {
 	if ref == nil {
 		return fmt.Errorf("preflight event reference is nil")
 	}
@@ -123,13 +124,17 @@ func (sink *kubeEventSink) recordPreflightEvent(ref *corev1.ObjectReference, eve
 	if err != nil {
 		return fmt.Errorf("create preflight event for %s: %w", ref.Name, err)
 	}
-	klog.V(3).InfoS("record preflight event", "eventNamespace", evt.Namespace, "involvedName", ref.Name, "reason", evt.Reason, "workload", event.Annotations[constants.PreflightWorkloadAnnotation])
+	klog.V(3).InfoS("record preflight event", "eventNamespace", evt.Namespace, "involvedName", ref.Name, "reason", evt.Reason, "workload", event.Annotations[constants.PreflightWorkloadAnnotation], "report", event.Annotations[constants.PreflightReportAnnotation])
 
 	return nil
 }
 
 func preflightEventMessage(event Event) string {
 	workload := event.Annotations[constants.PreflightWorkloadAnnotation]
+	report := event.Annotations[constants.PreflightReportAnnotation]
+	if report != "" && workload != "" {
+		return fmt.Sprintf("preflight report(%s) available for workload(%s) on node(%s)", report, workload, event.Name)
+	}
 	if workload == "" {
 		return fmt.Sprintf("preflight report available for node(%s)", event.Name)
 	}
@@ -151,8 +156,6 @@ func annotationsForEvent(event Event) map[string]string {
 	}
 
 	if IsPreflightEvent(event.Annotations) {
-		annotations[constants.PreflightNamespaceAnnotation] = event.Namespace
-		annotations[constants.PreflightPayloadAnnotation] = event.Message
 		return annotations
 	}
 
@@ -163,7 +166,7 @@ func annotationsForEvent(event Event) map[string]string {
 	return annotations
 }
 
-func (sink *kubeEventSink) RecordEvent(e Event) error {
+func (sink *KubeEventSink) RecordEvent(e Event) error {
 	var err error
 	switch e.ResourceType {
 	case Pod:
