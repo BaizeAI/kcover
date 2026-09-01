@@ -2,7 +2,7 @@ module github.com/baizeai/kcover
 
 go 1.26.0
 
-toolchain go1.26.5
+toolchain go1.27.1
 
 require (
 	github.com/jellydator/ttlcache/v3 v3.4.1
