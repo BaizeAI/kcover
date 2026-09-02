@@ -1,5 +1,5 @@
 ARG MX_SMI_IMAGE=ghcr.io/baizeai/mx-smi:v0.2
-ARG GO_BUILDER_IMAGE=m.daocloud.io/docker.io/library/golang:1.25.5-alpine
+ARG GO_BUILDER_IMAGE=m.daocloud.io/docker.io/library/golang:1.27.1-alpine
 
 FROM --platform=$BUILDPLATFORM ${GO_BUILDER_IMAGE} AS builder
 
