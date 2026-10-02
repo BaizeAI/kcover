@@ -2,6 +2,12 @@
 
 Welcome to `kcover`, a Kubernetes solution designed to enhance the reliability and resilience of large-scale AI workloads by providing fault awareness and robust instant recovery mechanisms.
 
+## Origin
+
+`kcover` was originally created by [DaoCloud](https://www.daocloud.io/).
+See the [public repository history](https://github.com/BaizeAI/kcover/commits/main/)
+for provenance.
+
 ## Features
 
 - **Fault Awareness**: Detect and respond to hardware, network, and software failures dynamically.
