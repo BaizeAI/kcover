@@ -180,20 +180,21 @@ func (r *RecoveryController) onNodeError(ctx context.Context, e events.Event) {
 		return
 	}
 
-	jobs, err := r.listJobsOnNode(ctx, e.Name)
+	pods, err := r.listJobPodsOnNode(ctx, e.Name)
 	if err != nil {
-		klog.ErrorS(err, "failed to list jobs on node", "node", e.Name)
+		klog.ErrorS(err, "failed to list job pods on node", "node", e.Name)
 		return
 	}
 
-	for _, job := range jobs {
-		r.onPodError(ctx, job.ns, job.name)
+	// Check each pod's recovery policy; the restart ledger deduplicates jobs.
+	for _, pod := range pods {
+		r.onPodError(ctx, pod.ns, pod.name)
 	}
 
 	r.ensureNodeUnschedulable(ctx, e.Name)
 }
 
-func (r *RecoveryController) listJobsOnNode(ctx context.Context, nodeName string) ([]nsName, error) {
+func (r *RecoveryController) listJobPodsOnNode(ctx context.Context, nodeName string) ([]nsName, error) {
 	// TODO: traner v2 & lws?
 	ctx, cancel := kube.WithRequestTimeout(ctx)
 	defer cancel()
@@ -206,19 +207,12 @@ func (r *RecoveryController) listJobsOnNode(ctx context.Context, nodeName string
 		return nil, err
 	}
 
-	jobs := make(map[nsName]struct{})
+	items := make([]nsName, 0, len(pods.Items))
 	for _, pod := range pods.Items {
-		jobLabel, ok := pod.Labels[constants.KubeflowJobLabel]
-		if !ok {
+		if _, ok := pod.Labels[constants.KubeflowJobLabel]; !ok {
 			continue
 		}
-
-		jobs[nsName{ns: pod.Namespace, name: jobLabel}] = struct{}{}
-	}
-
-	items := make([]nsName, 0, len(jobs))
-	for job := range jobs {
-		items = append(items, job)
+		items = append(items, nsName{ns: pod.Namespace, name: pod.Name})
 	}
 
 	return items, nil
